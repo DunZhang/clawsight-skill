@@ -1,0 +1,1359 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Claude Code /insights 命令深度解析</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #232733;
+    --border: #2e3345;
+    --text: #e2e4eb;
+    --text-dim: #8b8fa3;
+    --accent: #7c6aef;
+    --accent-light: #9d8ff5;
+    --green: #34d399;
+    --orange: #fb923c;
+    --red: #f87171;
+    --blue: #60a5fa;
+    --cyan: #22d3ee;
+    --pink: #f472b6;
+    --yellow: #fbbf24;
+    --code-bg: #141720;
+    --code-border: #2a2f40;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+    font-size: 15px;
+  }
+
+  /* Header */
+  .hero {
+    background: linear-gradient(135deg, #1a1040 0%, #0f1117 50%, #0a1628 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 60px 0 50px;
+    text-align: center;
+  }
+  .hero h1 {
+    font-size: 2.4em;
+    font-weight: 700;
+    background: linear-gradient(135deg, var(--accent-light), var(--cyan));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 12px;
+  }
+  .hero .subtitle {
+    color: var(--text-dim);
+    font-size: 1.1em;
+    max-width: 600px;
+    margin: 0 auto;
+  }
+  .hero .meta {
+    margin-top: 20px;
+    display: flex;
+    gap: 20px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  .hero .meta span {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 6px 16px;
+    border-radius: 20px;
+    font-size: 0.85em;
+    color: var(--text-dim);
+  }
+  .hero .meta span strong { color: var(--text); }
+
+  /* Layout */
+  .container {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 0 24px;
+  }
+
+  /* Navigation */
+  .toc {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: rgba(15, 17, 23, 0.92);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 0;
+  }
+  .toc-inner {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 0 24px;
+    display: flex;
+    gap: 4px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .toc-inner::-webkit-scrollbar { display: none; }
+  .toc a {
+    color: var(--text-dim);
+    text-decoration: none;
+    font-size: 0.82em;
+    padding: 6px 12px;
+    border-radius: 6px;
+    white-space: nowrap;
+    transition: all 0.2s;
+  }
+  .toc a:hover {
+    color: var(--text);
+    background: var(--surface);
+  }
+
+  /* Sections */
+  section {
+    padding: 48px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  section:last-child { border-bottom: none; }
+
+  h2 {
+    font-size: 1.6em;
+    font-weight: 700;
+    margin-bottom: 8px;
+    color: var(--text);
+  }
+  h2 .num {
+    color: var(--accent);
+    font-weight: 400;
+    margin-right: 8px;
+  }
+  .section-desc {
+    color: var(--text-dim);
+    margin-bottom: 28px;
+    font-size: 0.95em;
+  }
+
+  h3 {
+    font-size: 1.15em;
+    font-weight: 600;
+    margin: 28px 0 12px;
+    color: var(--accent-light);
+  }
+
+  h4 {
+    font-size: 1em;
+    font-weight: 600;
+    margin: 20px 0 8px;
+    color: var(--orange);
+  }
+
+  p { margin-bottom: 14px; }
+
+  /* Cards */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 16px;
+  }
+  .card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .card-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.1em;
+    flex-shrink: 0;
+  }
+  .card-title {
+    font-weight: 600;
+    font-size: 1.05em;
+  }
+
+  /* Flow diagram */
+  .flow {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    margin: 20px 0;
+  }
+  .flow-step {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 22px;
+    position: relative;
+  }
+  .flow-arrow {
+    text-align: center;
+    padding: 6px 0;
+    color: var(--accent);
+    font-size: 1.3em;
+    line-height: 1;
+  }
+  .flow-step .phase-tag {
+    display: inline-block;
+    font-size: 0.72em;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    padding: 3px 10px;
+    border-radius: 4px;
+    margin-bottom: 8px;
+  }
+  .phase-1 { background: rgba(124, 106, 239, 0.15); color: var(--accent-light); }
+  .phase-2 { background: rgba(52, 211, 153, 0.15); color: var(--green); }
+  .phase-3 { background: rgba(251, 146, 60, 0.15); color: var(--orange); }
+  .phase-4 { background: rgba(96, 165, 250, 0.15); color: var(--blue); }
+  .phase-5 { background: rgba(244, 114, 182, 0.15); color: var(--pink); }
+  .phase-6 { background: rgba(34, 211, 238, 0.15); color: var(--cyan); }
+
+  .flow-step h4 { margin: 0 0 6px; color: var(--text); font-size: 1em; }
+  .flow-step p { margin: 0; color: var(--text-dim); font-size: 0.9em; }
+
+  /* Code blocks */
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 8px;
+    padding: 18px 20px;
+    overflow-x: auto;
+    margin: 12px 0 18px;
+    font-size: 0.88em;
+    line-height: 1.65;
+  }
+  code {
+    font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', Consolas, monospace;
+    font-size: 0.92em;
+  }
+  pre code { font-size: 1em; }
+  :not(pre) > code {
+    background: var(--surface2);
+    padding: 2px 7px;
+    border-radius: 4px;
+    color: var(--cyan);
+  }
+
+  /* Tables */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 14px 0 20px;
+    font-size: 0.9em;
+  }
+  th {
+    text-align: left;
+    padding: 10px 14px;
+    background: var(--surface2);
+    color: var(--text-dim);
+    font-weight: 600;
+    font-size: 0.85em;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    border-bottom: 1px solid var(--border);
+  }
+  td {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(124, 106, 239, 0.04); }
+
+  /* Tags / badges */
+  .tag {
+    display: inline-block;
+    font-size: 0.78em;
+    padding: 2px 9px;
+    border-radius: 4px;
+    font-weight: 500;
+    margin: 2px 2px;
+  }
+  .tag-purple { background: rgba(124,106,239,0.18); color: var(--accent-light); }
+  .tag-green  { background: rgba(52,211,153,0.18); color: var(--green); }
+  .tag-orange { background: rgba(251,146,60,0.18); color: var(--orange); }
+  .tag-blue   { background: rgba(96,165,250,0.18); color: var(--blue); }
+  .tag-red    { background: rgba(248,113,113,0.18); color: var(--red); }
+  .tag-cyan   { background: rgba(34,211,238,0.18); color: var(--cyan); }
+  .tag-pink   { background: rgba(244,114,182,0.18); color: var(--pink); }
+
+  /* Directory tree */
+  .tree {
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 8px;
+    padding: 18px 22px;
+    font-family: 'SF Mono', Consolas, monospace;
+    font-size: 0.88em;
+    line-height: 1.8;
+    margin: 12px 0 18px;
+    color: var(--text-dim);
+  }
+  .tree .dir { color: var(--blue); }
+  .tree .file { color: var(--text); }
+  .tree .comment { color: #555b70; }
+
+  /* Prompt appendix */
+  .prompt-block {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-bottom: 24px;
+    overflow: hidden;
+  }
+  .prompt-header {
+    background: var(--surface2);
+    padding: 12px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    user-select: none;
+  }
+  .prompt-header:hover { background: rgba(124, 106, 239, 0.06); }
+  .prompt-header h4 {
+    margin: 0;
+    font-size: 0.95em;
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .prompt-header .toggle {
+    color: var(--text-dim);
+    font-size: 0.8em;
+    transition: transform 0.2s;
+  }
+  .prompt-body {
+    padding: 0;
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.35s ease, padding 0.35s ease;
+  }
+  .prompt-block.open .prompt-body {
+    padding: 20px;
+    max-height: 3000px;
+  }
+  .prompt-block.open .toggle { transform: rotate(180deg); }
+  .prompt-body pre {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  /* Callout */
+  .callout {
+    border-left: 3px solid var(--accent);
+    background: rgba(124, 106, 239, 0.06);
+    padding: 14px 18px;
+    border-radius: 0 8px 8px 0;
+    margin: 16px 0;
+    font-size: 0.92em;
+  }
+  .callout.warn {
+    border-left-color: var(--orange);
+    background: rgba(251, 146, 60, 0.06);
+  }
+  .callout.info {
+    border-left-color: var(--blue);
+    background: rgba(96, 165, 250, 0.06);
+  }
+
+  /* Grid */
+  .grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
+  @media (max-width: 700px) { .grid-2 { grid-template-columns: 1fr; } }
+
+  /* Scroll top */
+  .scroll-top {
+    position: fixed;
+    bottom: 30px;
+    right: 30px;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: white;
+    border: none;
+    cursor: pointer;
+    font-size: 1.2em;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+    z-index: 200;
+  }
+  .scroll-top.show { display: flex; }
+
+  /* Footer */
+  footer {
+    text-align: center;
+    padding: 40px 0;
+    color: var(--text-dim);
+    font-size: 0.85em;
+    border-top: 1px solid var(--border);
+  }
+
+  /* Lists */
+  ul, ol { margin: 8px 0 14px 22px; }
+  li { margin-bottom: 4px; }
+
+  /* Highlight keywords in prompts */
+  .kw { color: var(--accent-light); font-weight: 600; }
+  .str { color: var(--green); }
+  .cmt { color: #555b70; font-style: italic; }
+</style>
+</head>
+<body>
+
+<!-- Hero -->
+<div class="hero">
+  <div class="container">
+    <h1>Claude Code <code>/insights</code> 深度解析</h1>
+    <p class="subtitle">逆向分析 Claude Code CLI v2.1.69 中 <code>/insights</code> 命令的完整实现机制、数据流和所有内部 Prompt</p>
+    <div class="meta">
+      <span>CLI 版本: <strong>2.1.69</strong></span>
+      <span>二进制格式: <strong>Mach-O arm64</strong></span>
+      <span>分析日期: <strong>2026-03-06</strong></span>
+    </div>
+  </div>
+</div>
+
+<!-- TOC -->
+<nav class="toc">
+  <div class="toc-inner">
+    <a href="#overview">概览</a>
+    <a href="#architecture">架构</a>
+    <a href="#data-flow">数据流</a>
+    <a href="#data-schema">数据 Schema</a>
+    <a href="#enum-mapping">枚举映射</a>
+    <a href="#key-functions">关键函数</a>
+    <a href="#implementation-details">实现细节</a>
+    <a href="#final-injection">最终注入</a>
+    <a href="#appendix-prompts">附录: 完整 Prompt</a>
+  </div>
+</nav>
+
+<div class="container">
+
+<!-- Section 1: Overview -->
+<section id="overview">
+  <h2><span class="num">01</span>概览</h2>
+  <p class="section-desc"><code>/insights</code> 是 Claude Code CLI 内置的分析命令，通过两阶段 LLM 管道生成个性化使用报告。</p>
+
+  <div class="card">
+    <h3>命令注册定义</h3>
+    <pre><code>{
+  type:              "prompt",        <span class="cmt">// 不是 "local-jsx"，是 prompt 类型</span>
+  name:              "insights",
+  description:       "Generate a report analyzing your Claude Code sessions",
+  contentLength:     0,
+  isEnabled:         () => true,
+  isHidden:          false,
+  progressMessage:   "analyzing your sessions",
+  source:            "builtin",
+  getPromptForCommand(T) { ... }     <span class="cmt">// 核心：预处理后生成注入 prompt</span>
+}</code></pre>
+  </div>
+
+  <div class="callout info">
+    <strong>关键区分：</strong><code>/insights</code> 的 type 是 <code>"prompt"</code>，而 <code>/stats</code> 的 type 是 <code>"local-jsx"</code>（直接渲染本地 UI 组件）。<code>/insights</code> 会预处理数据并生成 prompt，注入到当前对话中，由模型来呈现结果。
+  </div>
+</section>
+
+<!-- Section 2: Architecture -->
+<section id="architecture">
+  <h2><span class="num">02</span>架构概览</h2>
+  <p class="section-desc">整体是一个"CLI 预处理 + LLM 分析 + 模型展示"的三层管道架构。</p>
+
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-icon" style="background:rgba(124,106,239,0.15);color:var(--accent-light)">P1</div>
+        <span class="card-title">Stage 1: 数据收集与提取</span>
+      </div>
+      <p style="color:var(--text-dim);font-size:0.9em">纯本地计算。扫描 JSONL 会话日志，提取结构化元数据（工具使用、代码变更、时间分布等），缓存到 <code>session-meta/</code>。</p>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <div class="card-icon" style="background:rgba(251,146,60,0.15);color:var(--orange)">P2</div>
+        <span class="card-title">Stage 2: LLM Facet 提取</span>
+      </div>
+      <p style="color:var(--text-dim);font-size:0.9em">对每个 session 的会话记录调用 Claude API，提取定性分析（目标、满意度、摩擦点等），缓存到 <code>facets/</code>。</p>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <div class="card-icon" style="background:rgba(52,211,153,0.15);color:var(--green)">P3</div>
+        <span class="card-title">Stage 3: 聚合统计</span>
+      </div>
+      <p style="color:var(--text-dim);font-size:0.9em">纯本地计算。合并所有 session-meta + facets，计算总量、分布、排名等聚合指标。</p>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <div class="card-icon" style="background:rgba(244,114,182,0.15);color:var(--pink)">P4</div>
+        <span class="card-title">Stage 4: LLM 报告生成</span>
+      </div>
+      <p style="color:var(--text-dim);font-size:0.9em">将聚合数据分发给 7+1 个并行 LLM 调用，生成多维度叙事报告，渲染 HTML 并注入对话。</p>
+    </div>
+  </div>
+
+  <div class="callout warn">
+    <strong>LLM 调用总量</strong> = 未缓存的 session 数（facet 提取）+ 7 个维度报告 + 1 个 at_a_glance 总结 = <code>N + 8</code> 次 API 调用。所有调用均标记 <code>querySource: "insights"</code>。
+  </div>
+</section>
+
+<!-- Section 3: Data Flow -->
+<section id="data-flow">
+  <h2><span class="num">03</span>完整数据流</h2>
+  <p class="section-desc">从原始会话日志到最终报告的 6 个处理阶段。</p>
+
+  <div class="flow">
+    <div class="flow-step">
+      <span class="phase-tag phase-1">Phase 1 &mdash; 收集</span>
+      <h4>扫描原始 Session 日志</h4>
+      <p>函数 <code>C14()</code> 遍历 <code>~/.claude/projects/*/</code> 下所有目录，读取 <code>.jsonl</code> 会话文件。排除 <code>agent-*.jsonl</code>。按修改时间排序，最多处理最近 <strong>200</strong> 个未缓存 session。</p>
+    </div>
+    <div class="flow-arrow">&darr;</div>
+
+    <div class="flow-step">
+      <span class="phase-tag phase-2">Phase 2 &mdash; 提取元数据</span>
+      <h4>结构化指标提取 (UaR 函数)</h4>
+      <p>对每个 session 提取：时间/时长、消息数、token 数、工具调用统计、语言检测、git 操作、代码变更行数、用户中断次数、响应时间分布。结果缓存到 <code>session-meta/{uuid}.json</code>。批量处理 50 个/批。</p>
+    </div>
+    <div class="flow-arrow">&darr;</div>
+
+    <div class="flow-step">
+      <span class="phase-tag phase-3">Phase 3 &mdash; Facet 提取 (LLM)</span>
+      <h4>定性分析提取 (Y14 函数)</h4>
+      <p>对每个有意义的 session（<code>messages &ge; 2</code> 且 <code>duration &ge; 1min</code>），将完整会话记录发送给 Claude API，使用 <strong>Facet 提取 Prompt</strong> 提取：underlying_goal、goal_categories、outcome、satisfaction、friction、helpfulness。最多处理 <strong>50</strong> 个未缓存 session，10 个/批并行。结果缓存到 <code>facets/{uuid}.json</code>。</p>
+    </div>
+    <div class="flow-arrow">&darr;</div>
+
+    <div class="flow-step">
+      <span class="phase-tag phase-4">Phase 4 &mdash; 聚合</span>
+      <h4>统计聚合 (W14 函数)</h4>
+      <p>纯本地计算。合并所有 session-meta + facets 数据，生成：总量统计、工具排行、语言分布、目标分类、结果分布、满意度分布、摩擦点统计、成功模式、并行使用检测（multi-clauding）、session 摘要列表（前50个）。过滤掉 <code>warmup_minimal</code> 类型的 session。</p>
+    </div>
+    <div class="flow-arrow">&darr;</div>
+
+    <div class="flow-step">
+      <span class="phase-tag phase-5">Phase 5 &mdash; 报告生成 (LLM)</span>
+      <h4>7+1 维度并行分析 (G14 &rarr; VK7)</h4>
+      <p>将聚合数据打包为 JSON，分发给 <strong>7 个并行 LLM 调用</strong>（project_areas, interaction_style, what_works, friction_analysis, suggestions, on_the_horizon, fun_ending），每个 <code>maxTokens=8192</code>。完成后，将前几个维度的结果拼入 <strong>at_a_glance</strong> 的第 8 次 LLM 调用。</p>
+    </div>
+    <div class="flow-arrow">&darr;</div>
+
+    <div class="flow-step">
+      <span class="phase-tag phase-6">Phase 6 &mdash; 渲染与注入</span>
+      <h4>HTML 生成 + Prompt 注入</h4>
+      <p><code>v14()</code> 将所有分析结果渲染为自包含 HTML 报告（内嵌 CSS+JS），保存到 <code>~/.claude/usage-data/report.html</code>。<code>getPromptForCommand()</code> 将完整 JSON 结果 + Markdown 摘要 + 固定输出指令拼装为 prompt，注入到当前对话上下文。</p>
+    </div>
+  </div>
+</section>
+
+<!-- Section 4: Data Schema -->
+<section id="data-schema">
+  <h2><span class="num">04</span>数据 Schema</h2>
+  <p class="section-desc">三层数据存储结构及其字段详解。</p>
+
+  <div class="tree">
+<span class="dir">~/.claude/</span>
+<span class="dir">&boxvr;&HorizontalLine; projects/</span>                          <span class="comment">&larr; 原始会话日志</span>
+<span class="dir">&boxvr;   &boxvr;&HorizontalLine; -Users-eastdog-projects-xxx/</span>
+<span class="file">&boxvr;   &boxvr;   &boxur;&HorizontalLine; {session-uuid}.jsonl</span>      <span class="comment">&larr; 每个 session 一个 JSONL 文件</span>
+<span class="dir">&boxvr;   &boxur;&HorizontalLine; ...</span>
+<span class="dir">&boxur;&HorizontalLine; usage-data/</span>                       <span class="comment">&larr; insights 产出目录</span>
+<span class="file">    &boxvr;&HorizontalLine; report.html</span>                  <span class="comment">&larr; 最终 HTML 报告 (~68KB)</span>
+<span class="dir">    &boxvr;&HorizontalLine; session-meta/</span>                <span class="comment">&larr; 结构化指标 (195 个 JSON)</span>
+<span class="file">    &boxvr;   &boxur;&HorizontalLine; {session-uuid}.json</span>
+<span class="dir">    &boxur;&HorizontalLine; facets/</span>                      <span class="comment">&larr; LLM 定性分析 (64 个 JSON)</span>
+<span class="file">        &boxur;&HorizontalLine; {session-uuid}.json</span>
+  </div>
+
+  <h3>session-meta Schema</h3>
+  <pre><code>{
+  "session_id":              "uuid",
+  "project_path":            "/Users/.../project-name",
+  "start_time":              "2026-02-15T14:30:00Z",    <span class="cmt">// ISO 8601</span>
+  "duration_minutes":        45,
+  "user_message_count":      8,
+  "assistant_message_count": 12,
+  "tool_counts": {
+    "Read": 15, "Edit": 8, "Bash": 22, "Grep": 5, ...
+  },
+  "languages": {
+    "Python": 12, "Markdown": 3, "Shell": 2
+  },
+  "git_commits":             2,
+  "git_pushes":              0,
+  "input_tokens":            45000,
+  "output_tokens":           12000,
+  "first_prompt":            "帮我实现 Phase 2 的特征工程...",  <span class="cmt">// 可能截断</span>
+  "user_interruptions":      1,
+  "user_response_times":     [5200, 12000, 8500],       <span class="cmt">// 毫秒</span>
+  "tool_errors":             0,
+  "tool_error_categories":   {},
+  "uses_task_agent":         true,
+  "uses_mcp":                false,
+  "uses_web_search":         false,
+  "uses_web_fetch":          false,
+  "lines_added":             342,
+  "lines_removed":           28,
+  "files_modified":          7,
+  "message_hours":           [14, 14, 15, 15, 15],      <span class="cmt">// 0-23 时段分布</span>
+  "user_message_timestamps": ["2026-02-15T14:30:00Z", ...]
+}</code></pre>
+
+  <h3>facets Schema</h3>
+  <pre><code>{
+  "session_id":              "uuid",
+  "underlying_goal":         "实现 ML pipeline Phase 2 特征工程",
+  "goal_categories": {
+    "implement_feature": 2,
+    "write_tests": 1
+  },
+  "outcome":                 "fully_achieved",
+  "user_satisfaction_counts": {
+    "satisfied": 2,
+    "likely_satisfied": 3
+  },
+  "claude_helpfulness":      "essential",
+  "session_type":            "single_task",
+  "friction_counts": {
+    "wrong_approach": 1
+  },
+  "friction_detail":         "Claude 最初用了 deprecated 的 NumPy API...",
+  "primary_success":         "multi_file_changes",
+  "brief_summary":           "用户要求实现特征工程管道..."
+}</code></pre>
+
+  <h3>聚合统计 Schema（W14 函数输出）</h3>
+  <pre><code>{
+  "total_sessions":           101,
+  "sessions_with_facets":     64,
+  "total_sessions_scanned":   217,        <span class="cmt">// 含未分析的</span>
+  "date_range":               { "start": "2026-02-02", "end": "2026-03-05" },
+  "total_messages":           430,
+  "total_duration_hours":     507,
+  "total_input_tokens":       ...,
+  "total_output_tokens":      ...,
+  "tool_counts":              { "Bash": 780, "Read": 503, "Edit": 366, ... },
+  "languages":                { "Python": ..., "TypeScript": ..., ... },
+  "git_commits":              17,
+  "git_pushes":               ...,
+  "projects":                 { "/path/to/project": session_count, ... },
+  "goal_categories":          { "implement_feature": N, ... },
+  "outcomes":                 { "fully_achieved": N, ... },
+  "satisfaction":             { "likely_satisfied": N, ... },
+  "helpfulness":              { "essential": N, ... },
+  "session_types":            { "single_task": N, ... },
+  "friction":                 { "wrong_approach": N, ... },
+  "success":                  { "multi_file_changes": N, ... },
+  "session_summaries":        [ ... ],    <span class="cmt">// 前 50 个摘要</span>
+  "total_interruptions":      ...,
+  "total_tool_errors":        ...,
+  "days_active":              20,
+  "messages_per_day":         21.5,
+  "message_hours":            [14, 15, ...],
+  "multi_clauding": {
+    "overlap_events":         0,          <span class="cmt">// 30 分钟窗口重叠</span>
+    "sessions_involved":      0,
+    "user_messages_during":   0
+  }
+}</code></pre>
+</section>
+
+<!-- Section 5: Enum Mapping -->
+<section id="enum-mapping">
+  <h2><span class="num">05</span>枚举值映射表</h2>
+  <p class="section-desc">源码中 <code>q14</code> 对象定义的所有分类标签及其展示名称。</p>
+
+  <h3>Goal Categories（目标分类）</h3>
+  <table>
+    <tr><th>内部 Key</th><th>展示名称</th></tr>
+    <tr><td><code>debug_investigate</code></td><td>Debug/Investigate</td></tr>
+    <tr><td><code>implement_feature</code></td><td>Implement Feature</td></tr>
+    <tr><td><code>fix_bug</code></td><td>Fix Bug</td></tr>
+    <tr><td><code>write_script_tool</code></td><td>Write Script/Tool</td></tr>
+    <tr><td><code>refactor_code</code></td><td>Refactor Code</td></tr>
+    <tr><td><code>configure_system</code></td><td>Configure System</td></tr>
+    <tr><td><code>create_pr_commit</code></td><td>Create PR/Commit</td></tr>
+    <tr><td><code>analyze_data</code></td><td>Analyze Data</td></tr>
+    <tr><td><code>understand_codebase</code></td><td>Understand Codebase</td></tr>
+    <tr><td><code>write_tests</code></td><td>Write Tests</td></tr>
+    <tr><td><code>write_docs</code></td><td>Write Docs</td></tr>
+    <tr><td><code>deploy_infra</code></td><td>Deploy/Infra</td></tr>
+    <tr><td><code>warmup_minimal</code></td><td>Cache Warmup <span class="tag tag-red">被过滤</span></td></tr>
+  </table>
+
+  <h3>Success Types（成功模式）</h3>
+  <table>
+    <tr><th>内部 Key</th><th>展示名称</th></tr>
+    <tr><td><code>fast_accurate_search</code></td><td>Fast/Accurate Search</td></tr>
+    <tr><td><code>correct_code_edits</code></td><td>Correct Code Edits</td></tr>
+    <tr><td><code>good_explanations</code></td><td>Good Explanations</td></tr>
+    <tr><td><code>proactive_help</code></td><td>Proactive Help</td></tr>
+    <tr><td><code>multi_file_changes</code></td><td>Multi-file Changes</td></tr>
+    <tr><td><code>handled_complexity</code></td><td>Multi-file Changes</td></tr>
+    <tr><td><code>good_debugging</code></td><td>Good Debugging</td></tr>
+  </table>
+
+  <h3>Friction Types（摩擦点类型）</h3>
+  <table>
+    <tr><th>内部 Key</th><th>展示名称</th></tr>
+    <tr><td><code>misunderstood_request</code></td><td>Misunderstood Request</td></tr>
+    <tr><td><code>wrong_approach</code></td><td>Wrong Approach</td></tr>
+    <tr><td><code>buggy_code</code></td><td>Buggy Code</td></tr>
+    <tr><td><code>user_rejected_action</code></td><td>User Rejected Action</td></tr>
+    <tr><td><code>claude_got_blocked</code></td><td>Claude Got Blocked</td></tr>
+    <tr><td><code>user_stopped_early</code></td><td>User Stopped Early</td></tr>
+    <tr><td><code>wrong_file_or_location</code></td><td>Wrong File/Location</td></tr>
+    <tr><td><code>excessive_changes</code></td><td>Excessive Changes</td></tr>
+    <tr><td><code>slow_or_verbose</code></td><td>Slow/Verbose</td></tr>
+    <tr><td><code>tool_failed</code></td><td>Tool Failed</td></tr>
+    <tr><td><code>user_unclear</code></td><td>User Unclear</td></tr>
+    <tr><td><code>external_issue</code></td><td>External Issue</td></tr>
+  </table>
+
+  <div class="grid-2">
+    <div>
+      <h3>Satisfaction Levels</h3>
+      <table>
+        <tr><th>Key</th><th>展示名称</th></tr>
+        <tr><td><code>frustrated</code></td><td>Frustrated</td></tr>
+        <tr><td><code>dissatisfied</code></td><td>Dissatisfied</td></tr>
+        <tr><td><code>likely_satisfied</code></td><td>Likely Satisfied</td></tr>
+        <tr><td><code>satisfied</code></td><td>Satisfied</td></tr>
+        <tr><td><code>happy</code></td><td>Happy</td></tr>
+        <tr><td><code>unsure</code></td><td>Unsure</td></tr>
+        <tr><td><code>neutral</code></td><td>Neutral</td></tr>
+        <tr><td><code>delighted</code></td><td>Delighted</td></tr>
+      </table>
+    </div>
+    <div>
+      <h3>Outcomes &amp; Session Types</h3>
+      <table>
+        <tr><th>Key</th><th>展示名称</th></tr>
+        <tr><td><code>fully_achieved</code></td><td>Fully Achieved</td></tr>
+        <tr><td><code>mostly_achieved</code></td><td>Mostly Achieved</td></tr>
+        <tr><td><code>partially_achieved</code></td><td>Partially Achieved</td></tr>
+        <tr><td><code>not_achieved</code></td><td>Not Achieved</td></tr>
+        <tr><td colspan="2" style="height:8px;border:none"></td></tr>
+        <tr><td><code>single_task</code></td><td>Single Task</td></tr>
+        <tr><td><code>multi_task</code></td><td>Multi Task</td></tr>
+        <tr><td><code>iterative_refinement</code></td><td>Iterative Refinement</td></tr>
+        <tr><td><code>exploration</code></td><td>Exploration</td></tr>
+        <tr><td><code>quick_question</code></td><td>Quick Question</td></tr>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- Section 6: Key Functions -->
+<section id="key-functions">
+  <h2><span class="num">06</span>关键函数解析</h2>
+  <p class="section-desc">从 minified 源码中还原的核心函数及其职责。</p>
+
+  <table>
+    <tr><th>函数名（混淆后）</th><th>职责</th><th>类型</th></tr>
+    <tr><td><code>L14(T)</code></td><td><strong>主入口函数</strong>。编排整个 insights 流程：收集 &rarr; 提取 &rarr; 聚合 &rarr; 生成 &rarr; 渲染</td><td><span class="tag tag-purple">编排</span></td></tr>
+    <tr><td><code>C14()</code></td><td>扫描 <code>~/.claude/projects/</code> 下所有 session JSONL 文件</td><td><span class="tag tag-green">I/O</span></td></tr>
+    <tr><td><code>UaR(Q)</code></td><td>从 JSONL 日志提取 session-meta 结构化指标</td><td><span class="tag tag-green">计算</span></td></tr>
+    <tr><td><code>Y14(F, Q)</code></td><td>调用 LLM 提取单个 session 的 facets</td><td><span class="tag tag-orange">LLM</span></td></tr>
+    <tr><td><code>W14(T, _)</code></td><td>将所有 session-meta + facets 合并为聚合统计</td><td><span class="tag tag-green">计算</span></td></tr>
+    <tr><td><code>G14(C, J)</code></td><td>并行调用 7 个 LLM 维度分析 + at_a_glance</td><td><span class="tag tag-orange">LLM</span></td></tr>
+    <tr><td><code>VK7(T, _)</code></td><td>单个维度的 LLM 调用封装</td><td><span class="tag tag-orange">LLM</span></td></tr>
+    <tr><td><code>v14(C, V)</code></td><td>将聚合数据 + 分析结果渲染为自包含 HTML</td><td><span class="tag tag-cyan">渲染</span></td></tr>
+    <tr><td><code>j14(T)</code></td><td>Multi-clauding 检测：30 分钟滑动窗口内的 session 重叠分析</td><td><span class="tag tag-green">计算</span></td></tr>
+    <tr><td><code>bK7(T)</code></td><td>Facet JSON 格式校验</td><td><span class="tag tag-blue">校验</span></td></tr>
+    <tr><td><code>w14(id)</code></td><td>读取 session-meta 缓存</td><td><span class="tag tag-green">I/O</span></td></tr>
+    <tr><td><code>z14(id)</code></td><td>读取 facets 缓存</td><td><span class="tag tag-green">I/O</span></td></tr>
+    <tr><td><code>J14(F)</code></td><td>写入 session-meta 缓存</td><td><span class="tag tag-green">I/O</span></td></tr>
+    <tr><td><code>P14(F)</code></td><td>写入 facets 缓存</td><td><span class="tag tag-green">I/O</span></td></tr>
+    <tr><td><code>pp_({...})</code></td><td>底层 Claude API 调用封装</td><td><span class="tag tag-orange">LLM</span></td></tr>
+    <tr><td><code>SK7()</code></td><td>获取 insights 专用的模型 ID</td><td><span class="tag tag-blue">配置</span></td></tr>
+  </table>
+</section>
+
+<!-- Section 7: Implementation Details -->
+<section id="implementation-details">
+  <h2><span class="num">07</span>实现细节</h2>
+  <p class="section-desc">从源码中提取的关键实现决策。</p>
+
+  <h3>过滤与防污染</h3>
+  <div class="card">
+    <table>
+      <tr><th>规则</th><th>实现</th></tr>
+      <tr><td>最低有效 session</td><td><code>user_message_count &ge; 2</code> 且 <code>duration_minutes &ge; 1</code></td></tr>
+      <tr><td>过滤 warmup</td><td>goal_categories 中只有 <code>warmup_minimal</code> 的 session 被排除</td></tr>
+      <tr><td>防自引用</td><td>跳过前 5 条消息包含 <code>"RESPOND WITH ONLY A VALID JSON OBJECT"</code> 或 <code>"record_facets"</code> 的 session</td></tr>
+      <tr><td>去重</td><td>同一 session_id 保留 message_count 最多的版本</td></tr>
+    </table>
+  </div>
+
+  <h3>批处理与并行</h3>
+  <div class="card">
+    <table>
+      <tr><th>阶段</th><th>批大小</th><th>最大数量</th></tr>
+      <tr><td>Session-meta 提取</td><td>50 个/批</td><td>200 个未缓存 session</td></tr>
+      <tr><td>JSONL 解析</td><td>10 个/批</td><td>跟随 session-meta</td></tr>
+      <tr><td>Facet LLM 提取</td><td>50 个/批</td><td>50 个未缓存 session</td></tr>
+      <tr><td>维度报告生成</td><td>7 个并行</td><td>+ 1 个 at_a_glance（依赖前 7 个）</td></tr>
+    </table>
+  </div>
+
+  <h3>LLM 调用参数</h3>
+  <pre><code>pp_({
+  systemPrompt:   RA([]),                   <span class="cmt">// 空 system prompt</span>
+  userPrompt:     dimension.prompt + data,  <span class="cmt">// 维度 prompt + 聚合数据</span>
+  signal:         new AbortController().signal,
+  options: {
+    model:                    SK7(),        <span class="cmt">// insights 专用模型</span>
+    querySource:              "insights",   <span class="cmt">// 标记来源</span>
+    agents:                   [],
+    isNonInteractiveSession:  true,
+    hasAppendSystemPrompt:    false,
+    mcpTools:                 [],
+    maxOutputTokensOverride:  4096          <span class="cmt">// 限制输出长度</span>
+  }
+})</code></pre>
+
+  <h3>Multi-Clauding 检测 (j14)</h3>
+  <p>检测用户是否在同一时间段使用多个 Claude Code 实例。算法：</p>
+  <ol>
+    <li>收集所有 session 的 <code>user_message_timestamps</code></li>
+    <li>按时间戳排序</li>
+    <li>维护 30 分钟（<code>1800000ms</code>）滑动窗口</li>
+    <li>检测窗口内不同 session 的消息交错出现</li>
+    <li>输出：重叠事件数、涉及的 session 数、重叠期间的消息数</li>
+  </ol>
+
+  <h3>语言检测</h3>
+  <pre><code><span class="cmt">// 基于文件扩展名的简单映射</span>
+R14 = {
+  ".ts": "TypeScript",  ".tsx": "TypeScript",
+  ".js": "JavaScript",  ".jsx": "JavaScript",
+  ".py": "Python",      ".rb": "Ruby",
+  ".go": "Go",          ".rs": "Rust",
+  ".java": "Java",      ".md": "Markdown",
+  ".json": "JSON",      ".yaml": "YAML",
+  ".yml": "YAML",       ".sh": "Shell",
+  ".css": "CSS",        ".html": "HTML"
+}</code></pre>
+</section>
+
+<!-- Section 8: Final Injection -->
+<section id="final-injection">
+  <h2><span class="num">08</span>最终注入到对话的 Prompt</h2>
+  <p class="section-desc"><code>getPromptForCommand()</code> 生成的最终 prompt 结构。</p>
+
+  <pre><code>The user just ran /insights to generate a usage report analyzing
+their Claude Code sessions.
+
+Here is the full insights data:
+<span class="str">${JSON.stringify(allInsightsData, null, 2)}</span>
+
+Report URL: <span class="str">file:///.../.claude/usage-data/report.html</span>
+HTML file: <span class="str">/.../.claude/usage-data/report.html</span>
+Facets directory: <span class="str">/.../.claude/usage-data/facets</span>
+
+Here is what the user sees:
+<span class="cmt"># Claude Code Insights
+217 sessions total · 101 analyzed · 430 messages · 507h · 17 commits
+2026-02-02 to 2026-03-05
+
+## At a Glance
+**What's working:** ...
+**What's hindering you:** ...
+**Quick wins to try:** ...
+**Ambitious workflows:** ...</span>
+
+Your full shareable insights report is ready: file:///...report.html
+
+Now output the following message exactly:
+
+&lt;message&gt;
+Your shareable insights report is ready:
+file:///...report.html
+
+Want to dig into any section or try one of the suggestions?
+&lt;/message&gt;</code></pre>
+
+  <div class="callout">
+    <strong>设计意图：</strong>模型收到完整的 JSON 分析结果，但被要求只输出一条简短消息。这样用户追问时，模型可以基于已注入的 JSON 数据深入展开任何维度。
+  </div>
+</section>
+
+<!-- Section 9: Appendix - All Prompts -->
+<section id="appendix-prompts">
+  <h2><span class="num">A</span>附录：完整原始 Prompt</h2>
+  <p class="section-desc">从 CLI 二进制中提取的所有 LLM Prompt 原文。点击标题展开/收起。</p>
+
+  <!-- Prompt A: Facet Extraction -->
+  <div class="prompt-block open" id="prompt-facet">
+    <div class="prompt-header" onclick="this.parentElement.classList.toggle('open')">
+      <h4><span class="tag tag-orange">Per-Session</span> A1. Facet 提取 Prompt (A14)</h4>
+      <span class="toggle">&#9660;</span>
+    </div>
+    <div class="prompt-body">
+      <pre><code>Analyze this Claude Code session and extract structured facets.
+
+CRITICAL GUIDELINES:
+1. **goal_categories**: Count ONLY what the USER explicitly asked for.
+   - DO NOT count Claude's autonomous codebase exploration
+   - DO NOT count work Claude decided to do on its own
+   - ONLY count when user says "can you...", "please...", "I need...", "let's..."
+
+2. **user_satisfaction_counts**: Base ONLY on explicit user signals.
+   - "Yay!", "great!", "perfect!" → happy
+   - "thanks", "looks good", "that works" → satisfied
+   - "ok, now let's..." (continuing without complaint) → likely_satisfied
+   - "that's not right", "try again" → dissatisfied
+   - "this is broken", "I give up" → frustrated
+
+3. **friction_counts**: Be specific about what went wrong.
+   - misunderstood_request: Claude interpreted incorrectly
+   - wrong_approach: Right goal, wrong solution method
+   - buggy_code: Code didn't work correctly
+   - user_rejected_action: User said no/stop to a tool call
+   - excessive_changes: Over-engineered or changed too much
+
+4. If very short or just warmup, use warmup_minimal for goal_category
+
+SESSION:
+{完整的会话 JSONL 记录}</code></pre>
+      <p style="color:var(--text-dim);font-size:0.85em;margin-top:12px">
+        <strong>输出格式：</strong>JSON 对象，字段包括 underlying_goal, goal_categories, outcome,
+        user_satisfaction_counts, claude_helpfulness, session_type, friction_counts,
+        friction_detail, primary_success, brief_summary。由 <code>bK7()</code> 函数校验。
+      </p>
+    </div>
+  </div>
+
+  <!-- Prompt A1.5: Chunk Summarization -->
+  <div class="prompt-block" id="prompt-chunk">
+    <div class="prompt-header" onclick="this.parentElement.classList.toggle('open')">
+      <h4><span class="tag tag-orange">Per-Chunk</span> A2. 长 Session 分段摘要 Prompt (K14)</h4>
+      <span class="toggle">&#9660;</span>
+    </div>
+    <div class="prompt-body">
+      <pre><code>Summarize this portion of a Claude Code session transcript. Focus on:
+1. What the user asked for
+2. What Claude did (tools used, files modified)
+3. Any friction or issues
+4. The outcome
+
+Keep it concise - 3-5 sentences. Preserve specific details like file names,
+error messages, and user feedback.
+
+TRANSCRIPT CHUNK:
+{会话记录片段}</code></pre>
+      <p style="color:var(--text-dim);font-size:0.85em;margin-top:12px">
+        <strong>用途：</strong>当 session 过长超过 token 限制时，先分段摘要再做 facet 提取。
+      </p>
+    </div>
+  </div>
+
+  <!-- Prompt B: project_areas -->
+  <div class="prompt-block" id="prompt-areas">
+    <div class="prompt-header" onclick="this.parentElement.classList.toggle('open')">
+      <h4><span class="tag tag-purple">Dimension 1</span> B1. project_areas</h4>
+      <span class="toggle">&#9660;</span>
+    </div>
+    <div class="prompt-body">
+      <pre><code>Analyze this Claude Code usage data and identify project areas.
+
+RESPOND WITH ONLY A VALID JSON OBJECT:
+  "areas": [
+    {
+      "name": "Area name",
+      "session_count": N,
+      "description": "2-3 sentences about what was worked on
+                      and how Claude Code was used."
+    }
+  ]
+
+Include 4-5 areas. Skip internal CC operations.
+
+{聚合统计 JSON + session 摘要}</code></pre>
+      <p style="color:var(--text-dim);font-size:0.85em;margin-top:12px"><strong>maxTokens:</strong> 8192</p>
+    </div>
+  </div>
+
+  <!-- Prompt C: interaction_style -->
+  <div class="prompt-block" id="prompt-style">
+    <div class="prompt-header" onclick="this.parentElement.classList.toggle('open')">
+      <h4><span class="tag tag-purple">Dimension 2</span> B2. interaction_style</h4>
+      <span class="toggle">&#9660;</span>
+    </div>
+    <div class="prompt-body">
+      <pre><code>Analyze this Claude Code usage data and describe the user's interaction style.
+
+RESPOND WITH ONLY A VALID JSON OBJECT:
+  "narrative": "2-3 paragraphs analyzing HOW the user interacts with
+               Claude Code. Use second person 'you'. Describe patterns:
+               iterate quickly vs detailed upfront specs? Interrupt
+               often or let Claude run? Include specific examples.
+               Use **bold** for key insights.",
+  "key_pattern": "One sentence summary of most distinctive
+                 interaction style"
+
+{聚合统计 JSON + session 摘要}</code></pre>
+      <p style="color:var(--text-dim);font-size:0.85em;margin-top:12px"><strong>maxTokens:</strong> 8192</p>
+    </div>
+  </div>
+
+  <!-- Prompt D: what_works -->
+  <div class="prompt-block" id="prompt-works">
+    <div class="prompt-header" onclick="this.parentElement.classList.toggle('open')">
+      <h4><span class="tag tag-purple">Dimension 3</span> B3. what_works</h4>
+      <span class="toggle">&#9660;</span>
+    </div>
+    <div class="prompt-body">
+      <pre><code>Analyze this Claude Code usage data and identify what's working well
+for this user. Use second person ("you").
+
+RESPOND WITH ONLY A VALID JSON OBJECT:
+  "intro": "1 sentence of context",
+  "impressive_workflows": [
+    {
+      "title": "Short title (3-6 words)",
+      "description": "2-3 sentences describing the impressive workflow
+                      or approach. Use 'you' not 'the user'."
+    }
+  ]
+
+Include 3 impressive workflows.
+
+{聚合统计 JSON + session 摘要}</code></pre>
+      <p style="color:var(--text-dim);font-size:0.85em;margin-top:12px"><strong>maxTokens:</strong> 8192</p>
+    </div>
+  </div>
+
+  <!-- Prompt E: friction_analysis -->
+  <div class="prompt-block" id="prompt-friction">
+    <div class="prompt-header" onclick="this.parentElement.classList.toggle('open')">
+      <h4><span class="tag tag-purple">Dimension 4</span> B4. friction_analysis</h4>
+      <span class="toggle">&#9660;</span>
+    </div>
+    <div class="prompt-body">
+      <pre><code>Analyze this Claude Code usage data and identify friction points
+for this user. Use second person ("you").
+
+RESPOND WITH ONLY A VALID JSON OBJECT:
+  "intro": "1 sentence summarizing friction patterns",
+  "categories": [
+    {
+      "category": "Concrete category name",
+      "description": "1-2 sentences explaining this category and
+                      what could be done differently.
+                      Use 'you' not 'the user'.",
+      "examples": [
+        "Specific example with consequence",
+        "Another example"
+      ]
+    }
+  ]
+
+Include 3 friction categories with 2 examples each.
+
+{聚合统计 JSON + session 摘要}</code></pre>
+      <p style="color:var(--text-dim);font-size:0.85em;margin-top:12px"><strong>maxTokens:</strong> 8192</p>
+    </div>
+  </div>
+
+  <!-- Prompt F: suggestions -->
+  <div class="prompt-block" id="prompt-suggestions">
+    <div class="prompt-header" onclick="this.parentElement.classList.toggle('open')">
+      <h4><span class="tag tag-purple">Dimension 5</span> B5. suggestions</h4>
+      <span class="toggle">&#9660;</span>
+    </div>
+    <div class="prompt-body">
+      <pre><code>Analyze this Claude Code usage data and suggest improvements.
+
+## CC FEATURES REFERENCE (pick from these for features_to_try):
+1. **MCP Servers**: Connect Claude to external tools, databases,
+   and APIs via Model Context Protocol.
+   - How to use: Run `claude mcp add &lt;server-name&gt; -- &lt;command&gt;`
+   - Good for: database queries, Slack integration, GitHub issue
+     lookup, connecting to internal APIs
+
+2. **Custom Skills**: Reusable prompts you define as markdown files
+   that run with a single /command.
+   - How to use: Create `.claude/skills/commit/SKILL.md` with
+     instructions. Then type `/commit` to run it.
+   - Good for: repetitive workflows - /commit, /review, /test,
+     /deploy, /pr, or complex multi-step workflows
+
+3. **Hooks**: Shell commands that auto-run at specific lifecycle events.
+   - How to use: Add to `.claude/settings.json` under "hooks" key.
+   - Good for: auto-formatting code, running type checks,
+     enforcing conventions
+
+4. **Headless Mode**: Run Claude non-interactively from scripts and CI/CD.
+   - How to use: `claude -p "fix lint errors" --allowedTools "Edit,Read,Bash"`
+   - Good for: CI/CD integration, batch code fixes, automated reviews
+
+5. **Task Agents**: Claude spawns focused sub-agents for complex
+   exploration or parallel work.
+   - How to use: Claude auto-invokes when helpful, or ask
+     "use an agent to explore X"
+   - Good for: codebase exploration, understanding complex systems
+
+RESPOND WITH ONLY A VALID JSON OBJECT:
+  "claude_md_additions": [
+    {
+      "addition": "A specific line or block to add to CLAUDE.md
+                   based on workflow patterns. E.g., 'Always run
+                   tests after modifying auth-related files'",
+      "why": "1 sentence explaining why this would help
+              based on actual sessions",
+      "prompt_scaffold": "Instructions for where to add this
+                         in CLAUDE.md. E.g., 'Add under
+                         ## Testing section'"
+    }
+  ],
+  "features_to_try": [
+    {
+      "feature": "Feature name from CC FEATURES REFERENCE above",
+      "one_liner": "What it does",
+      "why_for_you": "Why this would help YOU based on your sessions",
+      "example_code": "Actual command or config to copy"
+    }
+  ],
+  "usage_patterns": [
+    {
+      "title": "Short title",
+      "suggestion": "1-2 sentence summary",
+      "detail": "3-4 sentences explaining how this applies
+                to YOUR work",
+      "copyable_prompt": "A specific prompt to copy and try"
+    }
+  ]
+
+IMPORTANT for claude_md_additions: PRIORITIZE instructions that
+appear MULTIPLE TIMES in the user data. If user told Claude the
+same thing in 2+ sessions (e.g., 'always run tests', 'use
+TypeScript'), that's a PRIME candidate - they shouldn't have
+to repeat themselves.
+
+IMPORTANT for features_to_try: Pick 2-3 from the CC FEATURES
+REFERENCE above. Include 2-3 items for each category.
+
+{聚合统计 JSON + session 摘要}</code></pre>
+      <p style="color:var(--text-dim);font-size:0.85em;margin-top:12px"><strong>maxTokens:</strong> 8192。这是所有维度中最复杂的 prompt，包含了 CC 功能参考文档。</p>
+    </div>
+  </div>
+
+  <!-- Prompt G: on_the_horizon -->
+  <div class="prompt-block" id="prompt-horizon">
+    <div class="prompt-header" onclick="this.parentElement.classList.toggle('open')">
+      <h4><span class="tag tag-purple">Dimension 6</span> B6. on_the_horizon</h4>
+      <span class="toggle">&#9660;</span>
+    </div>
+    <div class="prompt-body">
+      <pre><code>Analyze this Claude Code usage data and identify future opportunities.
+
+RESPOND WITH ONLY A VALID JSON OBJECT:
+  "intro": "1 sentence about evolving AI-assisted development",
+  "opportunities": [
+    {
+      "title": "Short title (4-8 words)",
+      "whats_possible": "2-3 ambitious sentences about
+                        autonomous workflows",
+      "how_to_try": "1-2 sentences mentioning relevant tooling",
+      "copyable_prompt": "Detailed prompt to try"
+    }
+  ]
+
+Include 3 opportunities. Think BIG - autonomous workflows,
+parallel agents, iterating against tests.
+
+{聚合统计 JSON + session 摘要}</code></pre>
+      <p style="color:var(--text-dim);font-size:0.85em;margin-top:12px"><strong>maxTokens:</strong> 8192</p>
+    </div>
+  </div>
+
+  <!-- Prompt H: fun_ending -->
+  <div class="prompt-block" id="prompt-fun">
+    <div class="prompt-header" onclick="this.parentElement.classList.toggle('open')">
+      <h4><span class="tag tag-purple">Dimension 7</span> B7. fun_ending</h4>
+      <span class="toggle">&#9660;</span>
+    </div>
+    <div class="prompt-body">
+      <pre><code>Analyze this Claude Code usage data and find a memorable moment.
+
+RESPOND WITH ONLY A VALID JSON OBJECT:
+  "headline": "A memorable QUALITATIVE moment from the transcripts
+              - not a statistic. Something human, funny,
+              or surprising.",
+  "detail": "Brief context about when/where this happened"
+
+Find something genuinely interesting or amusing from
+the session summaries.
+
+{聚合统计 JSON + session 摘要}</code></pre>
+      <p style="color:var(--text-dim);font-size:0.85em;margin-top:12px"><strong>maxTokens:</strong> 8192</p>
+    </div>
+  </div>
+
+  <!-- Prompt I: at_a_glance -->
+  <div class="prompt-block" id="prompt-glance">
+    <div class="prompt-header" onclick="this.parentElement.classList.toggle('open')">
+      <h4><span class="tag tag-pink">Synthesis</span> B8. at_a_glance（依赖前 7 个维度结果）</h4>
+      <span class="toggle">&#9660;</span>
+    </div>
+    <div class="prompt-body">
+      <pre><code>You're writing an "At a Glance" summary for a Claude Code usage
+insights report for Claude Code users. The goal is to help them
+understand their usage and improve how they can use Claude better,
+especially as models improve.
+
+Use this 4-part structure:
+1. **What's working** - What is the user's unique style of interacting
+   with Claude and what are some impactful things they've done? You
+   can include one or two details, but keep it high level since things
+   might not be fresh in the user's memory. Don't be fluffy or overly
+   complimentary. Also, don't focus on the tool calls they use.
+
+2. **What's hindering you** - Split into (a) Claude's fault
+   (misunderstandings, wrong approaches, bugs) and (b) user-side
+   friction (not providing enough context, environment issues --
+   ideally more general than just one project). Be honest but
+   constructive.
+
+3. **Quick wins to try** - Specific Claude Code features they could
+   try from the examples below, or a workflow technique if you think
+   it's really compelling. (Avoid stuff like "Ask Claude to confirm
+   before taking actions" or "Type out more context up front" which
+   are less compelling.)
+
+4. **Ambitious workflows for better models** - As we move to much
+   more capable models over the next 3-6 months, what should they
+   prepare for? What workflows that seem impossible now will become
+   possible? Draw from the appropriate section below.
+
+Keep each section to 2-3 not-too-long sentences. Don't overwhelm
+the user. Don't mention specific numerical stats or
+underlined_categories from the session data below. Use a coaching tone.
+
+RESPOND WITH ONLY A VALID JSON OBJECT:
+  "whats_working": "(refer to instructions above)",
+  "whats_hindering": "(refer to instructions above)",
+  "quick_wins": "(refer to instructions above)",
+  "ambitious_workflows": "(refer to instructions above)"
+
+SESSION DATA:
+{聚合统计数据}
+
+## Project Areas (what user works on)
+{来自 Dimension 1 的结果}
+
+## Big Wins (impressive accomplishments)
+{来自 Dimension 3 的结果}
+
+## Friction Categories (where things go wrong)
+{来自 Dimension 4 的结果}
+
+## Features to Try
+{来自 Dimension 5 的 usage_patterns}
+
+## On the Horizon (ambitious workflows for better models)
+{来自 Dimension 6 的结果}</code></pre>
+      <p style="color:var(--text-dim);font-size:0.85em;margin-top:12px">
+        <strong>maxTokens:</strong> 8192。这是最后执行的 prompt，因为它需要前面 7 个维度的结果作为输入。
+      </p>
+    </div>
+  </div>
+
+  <!-- Prompt J: Final injection -->
+  <div class="prompt-block" id="prompt-final">
+    <div class="prompt-header" onclick="this.parentElement.classList.toggle('open')">
+      <h4><span class="tag tag-cyan">Injection</span> C1. 最终注入到对话的 Prompt</h4>
+      <span class="toggle">&#9660;</span>
+    </div>
+    <div class="prompt-body">
+      <pre><code>The user just ran /insights to generate a usage report analyzing
+their Claude Code sessions.
+
+Here is the full insights data:
+${JSON.stringify(allInsightsResults, null, 2)}
+
+Report URL: file:///.../.claude/usage-data/report.html
+HTML file: /.../.claude/usage-data/report.html
+Facets directory: /.../.claude/usage-data/facets
+
+Here is what the user sees:
+# Claude Code Insights
+{stats_summary_line}
+{date_range}
+
+## At a Glance
+**What's working:** {at_a_glance.whats_working} See _Impressive Things You Did_.
+**What's hindering you:** {at_a_glance.whats_hindering} See _Where Things Go Wrong_.
+**Quick wins to try:** {at_a_glance.quick_wins} See _Features to Try_.
+**Ambitious workflows:** {at_a_glance.ambitious_workflows} See _On the Horizon_.
+
+Your full shareable insights report is ready: file:///...report.html
+
+Now output the following message exactly:
+&lt;message&gt;
+Your shareable insights report is ready:
+file:///...report.html
+
+Want to dig into any section or try one of the suggestions?
+&lt;/message&gt;</code></pre>
+      <p style="color:var(--text-dim);font-size:0.85em;margin-top:12px">
+        <strong>设计：</strong>模型收到完整 JSON 数据但只输出简短消息。用户追问时可基于 JSON 展开。
+      </p>
+    </div>
+  </div>
+</section>
+
+</div><!-- container end -->
+
+<!-- Scroll to top -->
+<button class="scroll-top" id="scrollTop" onclick="window.scrollTo({top:0,behavior:'smooth'})">&#8593;</button>
+
+<footer>
+  <div class="container">
+    <p>通过逆向分析 Claude Code CLI v2.1.69 二进制文件（Mach-O arm64）生成</p>
+    <p style="margin-top:4px">分析工具：strings + grep | 分析日期：2026-03-06</p>
+  </div>
+</footer>
+
+<script>
+// Scroll to top button
+window.addEventListener('scroll', () => {
+  document.getElementById('scrollTop').classList.toggle('show', window.scrollY > 400);
+});
+
+// Smooth scroll for TOC links
+document.querySelectorAll('.toc a').forEach(a => {
+  a.addEventListener('click', e => {
+    e.preventDefault();
+    const target = document.querySelector(a.getAttribute('href'));
+    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+});
+</script>
+
+</body>
+</html>
