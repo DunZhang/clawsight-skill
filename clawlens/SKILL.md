@@ -1,9 +1,10 @@
 ---
 name: clawlens
-description: Analyze OpenClaw conversation history and generate a deep usage insights report covering usage stats, task classification, friction analysis, skills ecosystem, autonomous behavior audit, and multi-channel analysis.
+description: What do you use Claw for most? Where do you get stuck? Clawlens analyzes your conversation history to surface usage patterns, friction points, and skill effectiveness — your personal OpenClaw retrospective.
 user-invocable: true
 dependencies:
   - litellm
+  - markdown
 required-env:
   - DEEPSEEK_API_KEY or OPENAI_API_KEY or ANTHROPIC_API_KEY (depending on --model)
 reads:
@@ -46,6 +47,7 @@ python3 scripts/clawlens.py [OPTIONS]
 | `--days` | `180` | Analysis time window in days |
 | `--model` | **required** | LLM model in litellm format (e.g. `deepseek/deepseek-chat`). API key must be set via env var. |
 | `--lang` | `zh` | Report language: `zh` or `en` |
+| `--format` | `md` | Output format: `md` (Markdown) or `html` (self-contained dark-themed HTML) |
 | `--no-cache` | false | Ignore cached facet extraction results |
 | `--max-sessions` | `2000` | Maximum sessions to process |
 | `--concurrency` | `10` | Max parallel LLM calls |
@@ -63,15 +65,21 @@ OPENAI_API_KEY=sk-xxx python3 scripts/clawlens.py --model openai/gpt-4o --lang e
 
 # Verbose, save to file
 ANTHROPIC_API_KEY=sk-xxx python3 scripts/clawlens.py --model anthropic/claude-sonnet-4-20250514 --verbose -o /tmp/clawlens-report.md
+
+# HTML report (dark-themed, self-contained)
+DEEPSEEK_API_KEY=sk-xxx python3 scripts/clawlens.py --model deepseek/deepseek-chat --format html -o /tmp/clawlens-report.html
 ```
 
 ## Output
 
-The script outputs a **Markdown** report to stdout (or to the file specified by `-o`). Progress messages go to stderr when `--verbose` is set.
+The script outputs a report to stdout (or to the file specified by `-o`). Progress messages go to stderr when `--verbose` is set.
+
+- **Markdown** (`--format md`, default): Plain Markdown report. Present it directly to the user.
+- **HTML** (`--format html`): Self-contained dark-themed HTML file with glassmorphism styling, animated stat cards, CSS bar charts, and interactive navigation. Opens directly in any browser — no external dependencies. Requires the `markdown` Python package for Markdown-to-HTML conversion.
 
 The report includes all dimensions: usage overview, task classification, friction analysis, skills ecosystem, autonomous behavior audit, and multi-channel analysis.
 
-**Present the Markdown output directly to the user.** Do not summarize or truncate it.
+**Present the output directly to the user.** Do not summarize or truncate it.
 
 ## Model Configuration
 

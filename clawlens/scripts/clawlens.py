@@ -2,20 +2,23 @@
 """Clawlens - OpenClaw Usage Insights Report Generator.
 
 Analyzes OpenClaw conversation history and generates a multi-dimensional
-Markdown report covering usage stats, task classification, friction analysis,
+report covering usage stats, task classification, friction analysis,
 skills ecosystem, autonomous behavior audit, and multi-channel analysis.
+
+Output formats: Markdown (default) or self-contained HTML with dark theme.
 
 Pipeline:
   Stage 1: Data Collection (local) - scan session files, extract metadata
   Stage 2: LLM Facet Extraction (per-session, cached) - qualitative analysis
   Stage 3: Aggregation (local) - merge metadata + facets into stats
-  Stage 4: Report Generation (parallel LLM) - generate markdown sections
+  Stage 4: Report Generation (parallel LLM) - generate report sections
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import html as html_mod
 import json
 import sys
 import time
@@ -31,7 +34,7 @@ import litellm
 # Constants
 # ---------------------------------------------------------------------------
 
-VERSION = "0.1.0"
+VERSION = "1.1.0"
 
 TASK_CATEGORIES = [
     "email_management",
@@ -1048,17 +1051,20 @@ DIMENSION ANALYSES:
 {combined}"""
 
 
-async def generate_report(
+async def _generate_report_sections(
     stats: AggregateStats,
     sections: list[str],
     model: str,
     lang: str,
     concurrency: int,
-) -> str:
-    """Stage 4: Generate the final Markdown report."""
-    log(f"Stage 4: Generating report sections: {sections}")
+) -> tuple[dict[str, str], str]:
+    """Generate LLM content for each report section and the synthesis.
 
-    # Generate dimension sections in parallel
+    Returns:
+        (dimension_outputs, at_a_glance) - raw Markdown strings per section
+    """
+    log(f"Generating report sections: {sections}")
+
     semaphore = asyncio.Semaphore(concurrency)
 
     async def gen_section(dim: str) -> tuple[str, str]:
@@ -1078,13 +1084,29 @@ async def generate_report(
     results = await asyncio.gather(*tasks)
     dimension_outputs = dict(results)
 
-    # Generate synthesis (at_a_glance)
     log("  Generating: at_a_glance (synthesis)")
     try:
         synthesis_prompt = _make_synthesis_prompt(dimension_outputs, stats, lang)
         at_a_glance = await llm_call(synthesis_prompt, model, max_tokens=1024)
     except Exception:
         at_a_glance = ""
+
+    return dimension_outputs, at_a_glance
+
+
+async def generate_report(
+    stats: AggregateStats,
+    sections: list[str],
+    model: str,
+    lang: str,
+    concurrency: int,
+) -> str:
+    """Stage 4: Generate the final Markdown report."""
+    log(f"Stage 4: Generating Markdown report")
+
+    dimension_outputs, at_a_glance = await _generate_report_sections(
+        stats, sections, model, lang, concurrency,
+    )
 
     # Assemble final report
     now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -1157,6 +1179,960 @@ async def generate_report(
 
 
 # ---------------------------------------------------------------------------
+# HTML Report Template & Generation
+# ---------------------------------------------------------------------------
+
+HTML_CSS = """\
+:root {
+  --bg: #0f1117;
+  --surface: #1a1d27;
+  --surface2: #232733;
+  --border: #2e3345;
+  --text: #e2e4eb;
+  --text-dim: #8b8fa3;
+  --accent: #7c6aef;
+  --accent-light: #9d8ff5;
+  --green: #34d399;
+  --orange: #fb923c;
+  --red: #f87171;
+  --blue: #60a5fa;
+  --cyan: #22d3ee;
+  --pink: #f472b6;
+  --yellow: #fbbf24;
+  --code-bg: #141720;
+  --code-border: #2a2f40;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.7;
+  font-size: 15px;
+}
+
+/* ---- Animations ---- */
+@keyframes fadeSlideIn {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes glowPulse {
+  0%, 100% { box-shadow: 0 0 15px rgba(124, 106, 239, 0.1); }
+  50%      { box-shadow: 0 0 30px rgba(124, 106, 239, 0.25); }
+}
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-6px); }
+}
+@keyframes gradientShift {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* ---- Hero ---- */
+.hero {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(135deg, #1a1040 0%, #0f1117 50%, #0a1628 100%);
+  border-bottom: 1px solid var(--border);
+  padding: 72px 24px 56px;
+  text-align: center;
+}
+.hero::before {
+  content: '';
+  position: absolute;
+  top: -20%; right: -10%;
+  width: 500px; height: 500px;
+  border-radius: 50%;
+  background: var(--accent);
+  filter: blur(160px);
+  opacity: 0.12;
+  pointer-events: none;
+}
+.hero::after {
+  content: '';
+  position: absolute;
+  bottom: -30%; left: -5%;
+  width: 400px; height: 400px;
+  border-radius: 50%;
+  background: var(--cyan);
+  filter: blur(150px);
+  opacity: 0.08;
+  pointer-events: none;
+}
+.hero h1 {
+  position: relative;
+  z-index: 1;
+  font-size: 2.6em;
+  font-weight: 800;
+  background: linear-gradient(135deg, var(--accent-light), var(--cyan), var(--accent-light));
+  background-size: 200% 200%;
+  animation: gradientShift 6s ease infinite;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  margin-bottom: 12px;
+}
+.hero .subtitle {
+  position: relative; z-index: 1;
+  color: var(--text-dim);
+  font-size: 1.05em;
+}
+.hero .meta {
+  position: relative; z-index: 1;
+  margin-top: 24px;
+  display: flex;
+  gap: 14px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.hero .meta span {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  padding: 7px 18px;
+  border-radius: 24px;
+  font-size: 0.85em;
+  color: var(--text-dim);
+  backdrop-filter: blur(8px);
+}
+.hero .meta span strong { color: var(--text); }
+
+/* ---- Grid background overlay ---- */
+.grid-bg {
+  position: absolute; inset: 0;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+  background-size: 48px 48px;
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* ---- Sticky nav ---- */
+.toc {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: rgba(15, 17, 23, 0.92);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 0;
+}
+.toc-inner {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 0 24px;
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.toc-inner::-webkit-scrollbar { display: none; }
+.toc a {
+  color: var(--text-dim);
+  text-decoration: none;
+  font-size: 0.82em;
+  padding: 6px 14px;
+  border-radius: 6px;
+  white-space: nowrap;
+  transition: all 0.2s;
+}
+.toc a:hover {
+  color: var(--text);
+  background: var(--surface);
+}
+
+/* ---- Container ---- */
+.container {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+/* ---- Sections ---- */
+section {
+  padding: 48px 0;
+  border-bottom: 1px solid var(--border);
+  animation: fadeSlideIn 0.5s ease-out both;
+}
+section:last-child { border-bottom: none; }
+
+h2 {
+  font-size: 1.6em;
+  font-weight: 700;
+  margin-bottom: 8px;
+  color: var(--text);
+}
+h2 .num {
+  color: var(--accent);
+  font-weight: 400;
+  margin-right: 8px;
+}
+.section-desc {
+  color: var(--text-dim);
+  margin-bottom: 28px;
+  font-size: 0.95em;
+}
+
+h3 {
+  font-size: 1.15em;
+  font-weight: 600;
+  margin: 28px 0 12px;
+  color: var(--accent-light);
+}
+
+h4 {
+  font-size: 1em;
+  font-weight: 600;
+  margin: 20px 0 8px;
+  color: var(--orange);
+}
+
+p { margin-bottom: 14px; }
+ul, ol { margin: 0 0 14px 24px; }
+li { margin-bottom: 4px; }
+
+/* ---- Cards ---- */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+  margin-bottom: 16px;
+}
+
+/* ---- Stat Cards ---- */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 16px;
+  margin: 24px 0;
+}
+.stat-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px 20px;
+  text-align: center;
+  animation: fadeSlideIn 0.4s ease-out both;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+.stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+}
+.stat-card .icon {
+  width: 44px; height: 44px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.3em;
+  margin: 0 auto 14px;
+}
+.stat-card .value {
+  font-size: 2rem;
+  font-weight: 800;
+  line-height: 1.2;
+  margin-bottom: 4px;
+}
+.stat-card .label {
+  color: var(--text-dim);
+  font-size: 0.85em;
+}
+
+/* ---- Bar charts ---- */
+.bar-chart {
+  margin: 16px 0;
+}
+.bar-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 6px;
+  font-size: 0.85em;
+}
+.bar-label {
+  width: 80px;
+  flex-shrink: 0;
+  color: var(--text-dim);
+  text-align: right;
+  padding-right: 12px;
+  font-size: 0.82em;
+}
+.bar-track {
+  flex: 1;
+  height: 22px;
+  background: rgba(255,255,255,0.03);
+  border-radius: 6px;
+  overflow: hidden;
+  position: relative;
+}
+.bar-fill {
+  height: 100%;
+  border-radius: 6px;
+  transition: width 0.6s ease;
+  position: relative;
+}
+.bar-fill::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.08) 100%);
+  border-radius: 6px;
+}
+.bar-value {
+  width: 50px;
+  flex-shrink: 0;
+  text-align: right;
+  color: var(--text-dim);
+  font-size: 0.82em;
+  padding-left: 8px;
+}
+
+/* ---- Split bar (friction) ---- */
+.split-bar-container {
+  margin: 16px 0;
+}
+.split-bar {
+  height: 32px;
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex;
+  margin-bottom: 8px;
+}
+.split-bar .segment {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8em;
+  font-weight: 600;
+  color: rgba(255,255,255,0.9);
+  transition: width 0.6s ease;
+}
+.split-bar-legend {
+  display: flex;
+  gap: 24px;
+  font-size: 0.85em;
+}
+.split-bar-legend .dot {
+  display: inline-block;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+}
+
+/* ---- Tags / badges ---- */
+.tag {
+  display: inline-block;
+  font-size: 0.78em;
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-weight: 500;
+  margin: 2px 2px;
+}
+.tag-purple { background: rgba(124,106,239,0.18); color: var(--accent-light); }
+.tag-green  { background: rgba(52,211,153,0.18); color: var(--green); }
+.tag-orange { background: rgba(251,146,60,0.18); color: var(--orange); }
+.tag-blue   { background: rgba(96,165,250,0.18); color: var(--blue); }
+.tag-red    { background: rgba(248,113,113,0.18); color: var(--red); }
+.tag-cyan   { background: rgba(34,211,238,0.18); color: var(--cyan); }
+.tag-pink   { background: rgba(244,114,182,0.18); color: var(--pink); }
+.tag-yellow { background: rgba(251,191,36,0.18); color: var(--yellow); }
+
+/* ---- Outcome pills ---- */
+.pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 12px 0;
+}
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 0.85em;
+  font-weight: 500;
+  border: 1px solid;
+}
+
+/* ---- Tables ---- */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 14px 0 20px;
+  font-size: 0.9em;
+}
+th {
+  text-align: left;
+  padding: 10px 14px;
+  background: var(--surface2);
+  color: var(--text-dim);
+  font-weight: 600;
+  font-size: 0.85em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--border);
+}
+td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: rgba(124, 106, 239, 0.04); }
+
+/* ---- Code ---- */
+pre {
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
+  border-radius: 8px;
+  padding: 18px 20px;
+  overflow-x: auto;
+  margin: 12px 0 18px;
+  font-size: 0.88em;
+  line-height: 1.65;
+}
+code {
+  font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', Consolas, monospace;
+  font-size: 0.92em;
+}
+pre code { font-size: 1em; }
+:not(pre) > code {
+  background: var(--surface2);
+  padding: 2px 7px;
+  border-radius: 4px;
+  color: var(--cyan);
+}
+
+/* ---- Two-column layout ---- */
+.two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  margin: 16px 0;
+}
+
+/* ---- Glance card ---- */
+.glance-card {
+  background: linear-gradient(135deg, rgba(124,106,239,0.08), rgba(34,211,238,0.06));
+  border: 1px solid rgba(124,106,239,0.2);
+  border-radius: 14px;
+  padding: 28px 32px;
+  margin: 24px 0;
+  font-size: 1.05em;
+  line-height: 1.8;
+  animation: glowPulse 4s ease-in-out infinite;
+}
+
+/* ---- Footer ---- */
+footer {
+  text-align: center;
+  padding: 40px 24px;
+  color: var(--text-dim);
+  font-size: 0.82em;
+  border-top: 1px solid var(--border);
+}
+
+/* ---- Scroll to top ---- */
+.scroll-top {
+  position: fixed;
+  bottom: 28px;
+  right: 28px;
+  width: 42px; height: 42px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  font-size: 1.3em;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 20px rgba(124,106,239,0.4);
+  transition: opacity 0.3s, transform 0.3s;
+  z-index: 200;
+}
+.scroll-top:hover { transform: scale(1.1); }
+.scroll-top.visible { display: flex; }
+
+/* ---- LLM prose content styling ---- */
+.prose strong { color: var(--accent-light); }
+.prose em { color: var(--text-dim); font-style: italic; }
+.prose hr { border: none; border-top: 1px solid var(--border); margin: 24px 0; }
+
+/* ---- Print ---- */
+@media print {
+  body { background: #fff; color: #222; }
+  .toc, .scroll-top { display: none !important; }
+  .hero { background: #f5f5f5; }
+  .hero h1 { -webkit-text-fill-color: #333; }
+  .stat-card, .card, .glance-card { box-shadow: none; border-color: #ddd; }
+  section { break-inside: avoid; }
+}
+
+/* ---- Responsive ---- */
+@media (max-width: 640px) {
+  .hero h1 { font-size: 1.8em; }
+  .two-col { grid-template-columns: 1fr; }
+  .stat-grid { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
+}
+"""
+
+HTML_LABELS = {
+    "zh": {
+        "title": "Clawlens 使用洞察报告",
+        "at_a_glance": "概览摘要",
+        "stat_sessions": "会话",
+        "stat_messages": "消息",
+        "stat_tokens": "Token 消耗",
+        "stat_cost": "总费用",
+        "stat_days": "活跃天",
+        "hour_dist": "活跃时段分布",
+        "weekday_dist": "星期分布",
+        "weekdays": ["周一", "周二", "周三", "周四", "周五", "周六", "周日"],
+        "usage_overview": "使用概览",
+        "task_classification": "任务分类",
+        "friction_analysis": "摩擦分析",
+        "skills_ecosystem": "Skills 生态分析",
+        "autonomous_audit": "自主行为审计",
+        "channel_analysis": "多渠道分析",
+        "friction_claw": "Claw 侧",
+        "friction_user": "用户侧",
+        "outcomes_title": "成果分布",
+        "satisfaction_title": "满意度分布",
+        "models_title": "模型使用",
+        "channels_title": "渠道分布",
+        "footer": "报告由 clawlens v{version} 生成于 {time}",
+    },
+    "en": {
+        "title": "Clawlens Usage Insights Report",
+        "at_a_glance": "At a Glance",
+        "stat_sessions": "Sessions",
+        "stat_messages": "Messages",
+        "stat_tokens": "Tokens",
+        "stat_cost": "Total Cost",
+        "stat_days": "Active Days",
+        "hour_dist": "Hourly Activity",
+        "weekday_dist": "Weekday Activity",
+        "weekdays": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+        "usage_overview": "Usage Overview",
+        "task_classification": "Task Classification",
+        "friction_analysis": "Friction Analysis",
+        "skills_ecosystem": "Skills Ecosystem",
+        "autonomous_audit": "Autonomous Behavior Audit",
+        "channel_analysis": "Multi-Channel Analysis",
+        "friction_claw": "Claw-side",
+        "friction_user": "User-side",
+        "outcomes_title": "Outcome Distribution",
+        "satisfaction_title": "Satisfaction Distribution",
+        "models_title": "Model Usage",
+        "channels_title": "Channel Distribution",
+        "footer": "Report generated by clawlens v{version} at {time}",
+    },
+}
+
+# Color palette for bar charts (cycling)
+_PALETTE = [
+    "var(--accent)", "var(--cyan)", "var(--green)", "var(--orange)",
+    "var(--blue)", "var(--pink)", "var(--yellow)", "var(--red)",
+    "var(--accent-light)", "#8b5cf6", "#a78bfa",
+]
+
+OUTCOME_COLORS = {
+    "fully_achieved": ("var(--green)", "rgba(52,211,153,0.18)"),
+    "mostly_achieved": ("var(--blue)", "rgba(96,165,250,0.18)"),
+    "partially_achieved": ("var(--orange)", "rgba(251,146,60,0.18)"),
+    "not_achieved": ("var(--red)", "rgba(248,113,113,0.18)"),
+    "unclear": ("var(--text-dim)", "rgba(139,143,163,0.18)"),
+}
+
+SATISFACTION_COLORS = {
+    "happy": ("var(--green)", "rgba(52,211,153,0.18)"),
+    "satisfied": ("var(--cyan)", "rgba(34,211,238,0.18)"),
+    "likely_satisfied": ("var(--blue)", "rgba(96,165,250,0.18)"),
+    "dissatisfied": ("var(--orange)", "rgba(251,146,60,0.18)"),
+    "frustrated": ("var(--red)", "rgba(248,113,113,0.18)"),
+    "unsure": ("var(--text-dim)", "rgba(139,143,163,0.18)"),
+}
+
+
+def _esc(text: str) -> str:
+    """HTML-escape a string."""
+    return html_mod.escape(str(text))
+
+
+def _fmt_number(n: int | float) -> str:
+    """Format a number with K/M suffixes for readability."""
+    if isinstance(n, float):
+        if n >= 1_000_000:
+            return f"{n / 1_000_000:.1f}M"
+        if n >= 1_000:
+            return f"{n / 1_000:.1f}K"
+        return f"{n:.2f}"
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    if n >= 10_000:
+        return f"{n / 1_000:.1f}K"
+    return f"{n:,}"
+
+
+def _build_stat_cards(stats: AggregateStats, lang: str) -> str:
+    """Build the key metrics stat card grid."""
+    L = HTML_LABELS.get(lang, HTML_LABELS["en"])
+    cards_data = [
+        ("var(--accent)", L["stat_sessions"], _fmt_number(stats.total_sessions)),
+        ("var(--cyan)", L["stat_messages"], _fmt_number(stats.total_messages)),
+        ("var(--blue)", L["stat_tokens"], _fmt_number(stats.total_tokens)),
+        ("var(--green)", L["stat_cost"], f"${stats.total_cost:.2f}"),
+        ("var(--orange)", L["stat_days"], str(stats.days_active)),
+    ]
+    items = []
+    for i, (color, label, value) in enumerate(cards_data):
+        items.append(
+            f'<div class="stat-card" style="animation-delay:{i * 0.08}s; border-left: 3px solid {color};">'
+            f'<div class="value" style="color:{color};">{_esc(value)}</div>'
+            f'<div class="label">{_esc(label)}</div>'
+            f'</div>'
+        )
+    return f'<div class="stat-grid">{"".join(items)}</div>'
+
+
+def _build_bar_chart(data: dict, labels: dict | None, title: str,
+                     color_start: str = "var(--blue)", color_end: str = "var(--cyan)",
+                     use_palette: bool = False) -> str:
+    """Build a horizontal bar chart from a dict of {label: count}."""
+    if not data:
+        return ""
+    sorted_items = sorted(data.items(), key=lambda x: x[1], reverse=True)
+    max_val = max(v for _, v in sorted_items) or 1
+    rows = []
+    for i, (key, count) in enumerate(sorted_items):
+        pct = count / max_val * 100
+        display_label = labels.get(key, key) if labels else str(key)
+        if use_palette:
+            color = _PALETTE[i % len(_PALETTE)]
+            bg = f"background: {color};"
+        else:
+            bg = f"background: linear-gradient(90deg, {color_start}, {color_end});"
+        rows.append(
+            f'<div class="bar-row">'
+            f'<div class="bar-label">{_esc(display_label)}</div>'
+            f'<div class="bar-track">'
+            f'<div class="bar-fill" style="width:{pct:.1f}%;{bg}"></div>'
+            f'</div>'
+            f'<div class="bar-value">{count}</div>'
+            f'</div>'
+        )
+    return (
+        f'<div class="card">'
+        f'<h3>{_esc(title)}</h3>'
+        f'<div class="bar-chart">{"".join(rows)}</div>'
+        f'</div>'
+    )
+
+
+def _build_hour_chart(stats: AggregateStats, lang: str) -> str:
+    """Build 24-hour activity distribution chart."""
+    L = HTML_LABELS.get(lang, HTML_LABELS["en"])
+    dist = stats.hour_distribution
+    if not dist:
+        return ""
+    full_data = {f"{h:02d}:00": dist.get(h, 0) for h in range(24)}
+    return _build_bar_chart(full_data, None, L["hour_dist"],
+                            color_start="var(--blue)", color_end="var(--cyan)")
+
+
+def _build_weekday_chart(stats: AggregateStats, lang: str) -> str:
+    """Build weekday activity distribution chart."""
+    L = HTML_LABELS.get(lang, HTML_LABELS["en"])
+    dist = stats.weekday_distribution
+    if not dist:
+        return ""
+    weekday_labels = L["weekdays"]
+    full_data = {weekday_labels[d]: dist.get(d, 0) for d in range(7)}
+    return _build_bar_chart(full_data, None, L["weekday_dist"],
+                            color_start="var(--accent)", color_end="var(--pink)")
+
+
+def _build_task_bars(stats: AggregateStats, lang: str) -> str:
+    """Build task category breakdown bars."""
+    L = HTML_LABELS.get(lang, HTML_LABELS["en"])
+    cat_labels = CATEGORY_LABELS.get(lang, CATEGORY_LABELS["en"])
+    return _build_bar_chart(stats.task_categories, cat_labels, L["task_classification"],
+                            use_palette=True)
+
+
+def _build_friction_split(stats: AggregateStats, lang: str) -> str:
+    """Build the Claw vs User friction split bar."""
+    L = HTML_LABELS.get(lang, HTML_LABELS["en"])
+    attr = stats.friction_by_attribution
+    claw = attr.get("claw", 0)
+    user = attr.get("user", 0)
+    total = claw + user
+    if total == 0:
+        return ""
+    claw_pct = claw / total * 100
+    user_pct = 100 - claw_pct
+    return (
+        f'<div class="split-bar-container">'
+        f'<div class="split-bar">'
+        f'<div class="segment" style="width:{claw_pct:.1f}%;background:var(--red);">'
+        f'{claw} ({claw_pct:.0f}%)</div>'
+        f'<div class="segment" style="width:{user_pct:.1f}%;background:var(--orange);">'
+        f'{user} ({user_pct:.0f}%)</div>'
+        f'</div>'
+        f'<div class="split-bar-legend">'
+        f'<span><span class="dot" style="background:var(--red);"></span>{_esc(L["friction_claw"])} ({claw})</span>'
+        f'<span><span class="dot" style="background:var(--orange);"></span>{_esc(L["friction_user"])} ({user})</span>'
+        f'</div>'
+        f'</div>'
+    )
+
+
+def _build_pills(data: dict, color_map: dict, title: str, lang: str) -> str:
+    """Build colored pill badges for outcome/satisfaction distributions."""
+    if not data or all(v == 0 for v in data.values()):
+        return ""
+    labels_map = FRICTION_LABELS.get(lang, FRICTION_LABELS["en"])  # reuse for key->display
+    pills = []
+    for key, count in data.items():
+        if count == 0:
+            continue
+        fg, bg = color_map.get(key, ("var(--text-dim)", "rgba(139,143,163,0.18)"))
+        display = labels_map.get(key, key.replace("_", " ").title())
+        pills.append(
+            f'<span class="pill" style="color:{fg};background:{bg};border-color:{fg};">'
+            f'{_esc(display)} <strong>{count}</strong></span>'
+        )
+    return (
+        f'<div style="margin:16px 0;">'
+        f'<h3>{_esc(title)}</h3>'
+        f'<div class="pill-row">{"".join(pills)}</div>'
+        f'</div>'
+    )
+
+
+def _build_model_tags(stats: AggregateStats, lang: str) -> str:
+    """Build model usage tag badges."""
+    L = HTML_LABELS.get(lang, HTML_LABELS["en"])
+    if not stats.models_used:
+        return ""
+    tag_colors = ["tag-purple", "tag-cyan", "tag-blue", "tag-green", "tag-orange", "tag-pink"]
+    tags = []
+    for i, (model_name, count) in enumerate(sorted(stats.models_used.items(), key=lambda x: x[1], reverse=True)):
+        cls = tag_colors[i % len(tag_colors)]
+        tags.append(f'<span class="tag {cls}">{_esc(model_name)} ({count})</span>')
+    return (
+        f'<div style="margin:16px 0;">'
+        f'<h3>{_esc(L["models_title"])}</h3>'
+        f'<div style="margin-top:8px;">{"".join(tags)}</div>'
+        f'</div>'
+    )
+
+
+def _build_channel_bars(stats: AggregateStats, lang: str) -> str:
+    """Build channel distribution bars."""
+    L = HTML_LABELS.get(lang, HTML_LABELS["en"])
+    return _build_bar_chart(stats.channel_distribution, None, L["channels_title"],
+                            use_palette=True)
+
+
+def _md_to_html(md_text: str) -> str:
+    """Convert a Markdown string to HTML. Falls back to <pre> if markdown lib unavailable."""
+    try:
+        import markdown
+        md = markdown.Markdown(extensions=["tables", "fenced_code"])
+        result = md.convert(md_text)
+        md.reset()
+        return result
+    except ImportError:
+        # Fallback: wrap in <pre> with basic escaping
+        return f"<pre>{_esc(md_text)}</pre>"
+
+
+async def generate_html_report(
+    stats: AggregateStats,
+    sections: list[str],
+    model: str,
+    lang: str,
+    concurrency: int,
+) -> str:
+    """Stage 4: Generate the final HTML report."""
+    log("Stage 4: Generating HTML report")
+
+    # Reuse the same LLM section generation
+    dimension_outputs, at_a_glance = await _generate_report_sections(
+        stats, sections, model, lang, concurrency,
+    )
+
+    L = HTML_LABELS.get(lang, HTML_LABELS["en"])
+    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    date_start, date_end = stats.date_range
+    lang_attr = "zh-CN" if lang == "zh" else "en"
+
+    section_keys_to_labels = {
+        "usage_overview": L["usage_overview"],
+        "task_classification": L["task_classification"],
+        "friction_analysis": L["friction_analysis"],
+        "skills_ecosystem": L["skills_ecosystem"],
+        "autonomous_audit": L["autonomous_audit"],
+        "channel_analysis": L["channel_analysis"],
+    }
+
+    section_ids = {
+        "usage_overview": "overview",
+        "task_classification": "tasks",
+        "friction_analysis": "friction",
+        "skills_ecosystem": "skills",
+        "autonomous_audit": "autonomous",
+        "channel_analysis": "channels",
+    }
+
+    # Build nav links
+    nav_links = [f'<a href="#glance">{_esc(L["at_a_glance"])}</a>']
+    for dim in sections:
+        sid = section_ids.get(dim, dim)
+        label = section_keys_to_labels.get(dim, dim)
+        nav_links.append(f'<a href="#{sid}">{_esc(label)}</a>')
+
+    # Build data visuals
+    stat_cards = _build_stat_cards(stats, lang)
+    hour_chart = _build_hour_chart(stats, lang)
+    weekday_chart = _build_weekday_chart(stats, lang)
+    task_bars = _build_task_bars(stats, lang)
+    friction_split = _build_friction_split(stats, lang)
+    outcome_pills = _build_pills(stats.outcomes, OUTCOME_COLORS, L["outcomes_title"], lang)
+    satisfaction_pills = _build_pills(stats.satisfaction, SATISFACTION_COLORS, L["satisfaction_title"], lang)
+    model_tags = _build_model_tags(stats, lang)
+    channel_bars = _build_channel_bars(stats, lang)
+
+    # Build section HTML
+    sections_html = []
+    for i, dim in enumerate(sections, 1):
+        sid = section_ids.get(dim, dim)
+        heading = section_keys_to_labels.get(dim, dim)
+        md_content = dimension_outputs.get(dim, "")
+        content_html = _md_to_html(md_content)
+
+        # Insert data visuals before LLM prose for relevant sections
+        visuals = ""
+        if dim == "usage_overview":
+            time_charts = ""
+            if hour_chart or weekday_chart:
+                if hour_chart and weekday_chart:
+                    time_charts = f'<div class="two-col">{hour_chart}{weekday_chart}</div>'
+                else:
+                    time_charts = hour_chart or weekday_chart
+            visuals = stat_cards + model_tags + time_charts
+        elif dim == "task_classification":
+            visuals = task_bars
+        elif dim == "friction_analysis":
+            visuals = friction_split
+        elif dim == "channel_analysis":
+            visuals = channel_bars
+
+        sections_html.append(
+            f'<section id="{sid}" style="animation-delay:{(i * 0.1):.1f}s;">'
+            f'<h2><span class="num">0{i}</span>{_esc(heading)}</h2>'
+            f'{visuals}'
+            f'<div class="prose">{content_html}</div>'
+            f'</section>'
+        )
+
+    # Glance section
+    glance_html = ""
+    if at_a_glance:
+        glance_content = _md_to_html(at_a_glance)
+        glance_html = (
+            f'<section id="glance">'
+            f'<h2>{_esc(L["at_a_glance"])}</h2>'
+            f'<div class="glance-card">{glance_content}</div>'
+            f'{outcome_pills}{satisfaction_pills}'
+            f'</section>'
+        )
+
+    # Meta pills for hero
+    if lang == "zh":
+        meta_items = [
+            f'{date_start} ~ {date_end}',
+            f'<strong>{stats.total_sessions}</strong> 会话',
+            f'<strong>{stats.total_messages}</strong> 消息',
+            f'<strong>{stats.days_active}</strong> 活跃天',
+        ]
+    else:
+        meta_items = [
+            f'{date_start} ~ {date_end}',
+            f'<strong>{stats.total_sessions}</strong> sessions',
+            f'<strong>{stats.total_messages}</strong> messages',
+            f'<strong>{stats.days_active}</strong> active days',
+        ]
+    meta_spans = "".join(f"<span>{m}</span>" for m in meta_items)
+
+    footer_text = L["footer"].format(version=VERSION, time=now_str)
+
+    # Assemble full HTML
+    html = f"""<!DOCTYPE html>
+<html lang="{lang_attr}">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{_esc(L["title"])}</title>
+<style>
+{HTML_CSS}
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="grid-bg"></div>
+  <h1>{_esc(L["title"])}</h1>
+  <div class="meta">{meta_spans}</div>
+</div>
+
+<nav class="toc">
+  <div class="toc-inner">
+    {"".join(nav_links)}
+  </div>
+</nav>
+
+<div class="container">
+  {glance_html}
+  {"".join(sections_html)}
+</div>
+
+<footer>{_esc(footer_text)}</footer>
+
+<button class="scroll-top" onclick="window.scrollTo({{top:0,behavior:'smooth'}})" title="Back to top">&uarr;</button>
+
+<script>
+(function() {{
+  var btn = document.querySelector('.scroll-top');
+  window.addEventListener('scroll', function() {{
+    btn.classList.toggle('visible', window.scrollY > 400);
+  }});
+  document.querySelectorAll('.toc a').forEach(function(a) {{
+    a.addEventListener('click', function(e) {{
+      e.preventDefault();
+      var target = document.querySelector(this.getAttribute('href'));
+      if (target) target.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
+    }});
+  }});
+}})();
+</script>
+
+</body>
+</html>"""
+
+    log("Stage 4 complete: HTML report assembled")
+    return html
+
+
+# ---------------------------------------------------------------------------
 # CLI Entry Point
 # ---------------------------------------------------------------------------
 
@@ -1198,7 +2174,11 @@ async def async_main(args: argparse.Namespace) -> None:
 
     # Stage 4
     log("--- Stage 4: Report Generation ---")
-    report = await generate_report(stats, sections, model, args.lang, args.concurrency)
+    fmt = getattr(args, "format", "md")
+    if fmt == "html":
+        report = await generate_html_report(stats, sections, model, args.lang, args.concurrency)
+    else:
+        report = await generate_report(stats, sections, model, args.lang, args.concurrency)
 
     # Output
     if args.output:
@@ -1218,6 +2198,7 @@ def main() -> None:
   DEEPSEEK_API_KEY=sk-xxx python3 clawlens.py --model deepseek/deepseek-chat
   OPENAI_API_KEY=sk-xxx python3 clawlens.py --model openai/gpt-4o --lang en --days 7
   ANTHROPIC_API_KEY=sk-xxx python3 clawlens.py --model anthropic/claude-sonnet-4-20250514 --verbose -o report.md
+  DEEPSEEK_API_KEY=sk-xxx python3 clawlens.py --model deepseek/deepseek-chat --format html -o report.html
 """,
     )
     parser.add_argument("--agent-id", default="main", help="Agent ID (default: main)")
@@ -1227,6 +2208,7 @@ def main() -> None:
         help="LLM model in litellm format (e.g. deepseek/deepseek-chat). API key must be set via env var.",
     )
     parser.add_argument("--lang", default="zh", choices=["zh", "en"], help="Report language (default: zh)")
+    parser.add_argument("--format", default="md", choices=["md", "html"], help="Output format: md or html (default: md)")
     parser.add_argument("--no-cache", action="store_true", help="Ignore cached facet results")
     parser.add_argument("--max-sessions", type=int, default=2000, help="Max sessions to process (default: 2000)")
     parser.add_argument("--concurrency", type=int, default=10, help="Max parallel LLM calls (default: 10)")
