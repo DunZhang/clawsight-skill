@@ -6,11 +6,13 @@ dependencies:
   - litellm
   - markdown
 required-env:
-  - DEEPSEEK_API_KEY or OPENAI_API_KEY or ANTHROPIC_API_KEY (depending on --model)
+  - DEEPSEEK_API_KEY or OPENAI_API_KEY or ANTHROPIC_API_KEY (only when --model is specified manually; not needed for auto-detect)
 reads:
   - ~/.openclaw/agents/{agentId}/sessions/sessions.json
   - ~/.openclaw/agents/{agentId}/sessions/*.jsonl
   - ~/.openclaw/skills/
+  - ~/.openclaw/openclaw.json
+  - ~/.openclaw/agents/{agentId}/agent/auth-profiles.json
 writes:
   - ~/.openclaw/agents/{agentId}/sessions/.clawlens-cache/
 external-api:
@@ -45,7 +47,7 @@ python3 scripts/clawlens.py [OPTIONS]
 |------|---------|-------------|
 | `--agent-id` | `main` | Agent ID to analyze |
 | `--days` | `180` | Analysis time window in days |
-| `--model` | **required** | LLM model in litellm format (e.g. `deepseek/deepseek-chat`). API key must be set via env var. |
+| `--model` | auto-detect | LLM model in litellm format (e.g. `deepseek/deepseek-chat`). If omitted, auto-detected from OpenClaw config. |
 | `--lang` | `zh` | Report language: `zh` or `en` |
 | `--format` | `md` | Output format: `md` (Markdown) or `html` (self-contained dark-themed HTML) |
 | `--no-cache` | false | Ignore cached facet extraction results |
@@ -54,10 +56,27 @@ python3 scripts/clawlens.py [OPTIONS]
 | `--verbose` | false | Print progress to stderr |
 | `-o` / `--output` | stdout | Output file path |
 
+### Model Selection (Agent Interaction)
+
+When the user requests a clawlens report without specifying a model, **you must ask the user before running**:
+
+> 是否使用 OpenClaw 当前配置的模型来生成报告？如果不使用，请告诉我你想用的模型（litellm 格式，如 `deepseek/deepseek-chat`）。
+
+- **User agrees to use OpenClaw model**: Run **without** `--model` (the script auto-detects from `~/.openclaw/openclaw.json`).
+- **User specifies a different model**: Run with `--model <user-choice>`. The user must also set the corresponding API key env var (e.g. `DEEPSEEK_API_KEY`).
+
+Note: Each user's OpenClaw model configuration may differ — some use API-key-based providers (e.g. `openai-completions`), others use OAuth-based providers (e.g. `anthropic-messages`). The script handles both transparently.
+
 ### Examples
 
 ```bash
-# DeepSeek, 180 days, Chinese
+# Auto-detect model from OpenClaw config (simplest)
+python3 scripts/clawlens.py --verbose
+
+# Auto-detect, English, last 7 days
+python3 scripts/clawlens.py --lang en --days 7
+
+# Manually specify model (DeepSeek)
 DEEPSEEK_API_KEY=sk-xxx python3 scripts/clawlens.py --model deepseek/deepseek-chat
 
 # OpenAI, English, last 7 days
@@ -83,7 +102,14 @@ The report includes all dimensions: usage overview, task classification, frictio
 
 ## Model Configuration
 
-`--model` is required. The model name and API key must follow [litellm's provider format](https://docs.litellm.ai/docs/providers):
+`--model` is optional. If omitted, the model is automatically resolved from OpenClaw configuration:
+
+1. Reads primary model from `~/.openclaw/openclaw.json` (`agents.defaults.model.primary`, e.g. `kimi-code/kimi-for-coding`)
+2. Looks up the provider's `baseUrl` and `api` type (e.g. `openai-completions`, `anthropic-messages`)
+3. Retrieves API key/token from `~/.openclaw/agents/{agentId}/agent/auth-profiles.json`
+4. Maps to litellm format automatically (e.g. `openai/kimi-for-coding` with custom `api_base`)
+
+If you prefer to specify a model manually, use `--model` with [litellm's provider format](https://docs.litellm.ai/docs/providers):
 
 | Provider | `--model` value | Required env var |
 |----------|----------------|------------------|
@@ -110,4 +136,4 @@ This skill sends conversation transcript data to an **external LLM provider** (s
 - **Stage 2 (Facet Extraction)**: Each session's conversation transcript (truncated to ~80K chars) is sent to the LLM to extract structured analysis (task categories, friction points, etc.). Results are cached locally so each session is only sent once.
 - **Stage 4 (Report Generation)**: Aggregated statistics and session summaries (not raw transcripts) are sent to the LLM to generate the report sections.
 
-**No API keys or credentials are read from or stored by this skill.** The user must provide the LLM API key via environment variables before running the script. This skill does not access `openclaw.json` or `auth-profiles.json`.
+**API key handling:** When `--model` is omitted, this skill reads `openclaw.json` and `auth-profiles.json` to auto-detect the model and retrieve the API key. The API key is used only for LLM calls during report generation and is not stored or transmitted elsewhere. When `--model` is specified explicitly, the user must provide the API key via environment variables — no OpenClaw config files are accessed for credentials.

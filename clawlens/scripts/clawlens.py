@@ -231,11 +231,124 @@ class AggregateStats:
 # ---------------------------------------------------------------------------
 
 _verbose = False
+_model_api_base: str | None = None
+_model_api_key: str | None = None
+
+_API_TYPE_TO_LITELLM_PREFIX = {
+    "openai-completions": "openai",
+    "anthropic-messages": "anthropic",
+}
 
 
 def log(msg: str) -> None:
     if _verbose:
         print(f"[clawlens] {msg}", file=sys.stderr)
+
+
+def resolve_openclaw_model(agent_id: str = "main") -> tuple[str, str, str]:
+    """Resolve LLM model from OpenClaw configuration.
+
+    Reads ~/.openclaw/openclaw.json for the primary model and provider info,
+    then ~/.openclaw/agents/{agent_id}/agent/auth-profiles.json for credentials.
+
+    Returns:
+        (litellm_model_string, api_base_url, api_key)
+
+    Raises:
+        RuntimeError: if config files are missing or malformed.
+    """
+    openclaw_dir = Path.home() / ".openclaw"
+
+    # --- Read primary model from global config ---
+    config_path = openclaw_dir / "openclaw.json"
+    if not config_path.exists():
+        raise RuntimeError(f"{config_path} not found")
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        raise RuntimeError(f"Failed to read {config_path}: {e}")
+
+    try:
+        primary = config["agents"]["defaults"]["model"]["primary"]
+    except (KeyError, TypeError):
+        raise RuntimeError(
+            f"agents.defaults.model.primary not found in {config_path}"
+        )
+
+    # Parse "provider/model-id"
+    if "/" not in primary:
+        raise RuntimeError(
+            f"Invalid primary model format '{primary}', expected 'provider/model-id'"
+        )
+    provider_name, model_id = primary.split("/", 1)
+
+    # --- Look up provider details ---
+    providers = config.get("models", {}).get("providers", {})
+    if provider_name not in providers:
+        raise RuntimeError(
+            f"Provider '{provider_name}' not found in models.providers of {config_path}"
+        )
+    provider = providers[provider_name]
+    base_url = provider.get("baseUrl")
+    api_type = provider.get("api")
+    if not base_url:
+        raise RuntimeError(f"baseUrl missing for provider '{provider_name}'")
+    if not api_type:
+        raise RuntimeError(f"api type missing for provider '{provider_name}'")
+
+    litellm_prefix = _API_TYPE_TO_LITELLM_PREFIX.get(api_type)
+    if not litellm_prefix:
+        raise RuntimeError(
+            f"Unsupported API type '{api_type}' for provider '{provider_name}'. "
+            f"Supported: {list(_API_TYPE_TO_LITELLM_PREFIX.keys())}"
+        )
+
+    # --- Read auth credentials ---
+    auth_path = openclaw_dir / "agents" / agent_id / "agent" / "auth-profiles.json"
+    if not auth_path.exists():
+        raise RuntimeError(f"{auth_path} not found")
+    try:
+        auth_data = json.loads(auth_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        raise RuntimeError(f"Failed to read {auth_path}: {e}")
+
+    # Find profile via lastGood
+    last_good = auth_data.get("lastGood", {})
+    profile_name = last_good.get(provider_name)
+    if not profile_name:
+        raise RuntimeError(
+            f"No lastGood auth profile for provider '{provider_name}' in {auth_path}"
+        )
+    profiles = auth_data.get("profiles", {})
+    profile = profiles.get(profile_name)
+    if not profile:
+        raise RuntimeError(
+            f"Auth profile '{profile_name}' not found in {auth_path}"
+        )
+
+    auth_type = profile.get("type", "")
+    if auth_type == "api_key":
+        api_key = profile.get("key", "")
+    elif auth_type == "oauth":
+        api_key = profile.get("access", "")
+        # Warn if token might be expired
+        expires = profile.get("expires")
+        if expires and isinstance(expires, (int, float)):
+            if expires < time.time() * 1000:
+                log(f"WARNING: OAuth token for provider '{provider_name}' may be expired")
+    else:
+        raise RuntimeError(
+            f"Unknown auth type '{auth_type}' for profile '{profile_name}'"
+        )
+
+    if not api_key:
+        raise RuntimeError(
+            f"No API key/token found in auth profile '{profile_name}'"
+        )
+
+    litellm_model = f"{litellm_prefix}/{model_id}"
+    log(f"Resolved OpenClaw model: {primary} -> litellm={litellm_model}, base={base_url}")
+    return litellm_model, base_url, api_key
 
 
 # ---------------------------------------------------------------------------
@@ -619,16 +732,22 @@ TRANSCRIPT CHUNK:
 SUMMARY:"""
 
 
-async def llm_call(prompt: str, model: str, max_tokens: int = 4096, retries: int = 2) -> str:
+async def llm_call(prompt: str, model: str, max_tokens: int = 4096, retries: int = 3) -> str:
     """Make an LLM call via litellm with retry."""
+    kwargs: dict[str, Any] = dict(
+        model=model,
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=max_tokens,
+        temperature=0.3,
+    )
+    if _model_api_base:
+        kwargs["api_base"] = _model_api_base
+    if _model_api_key:
+        kwargs["api_key"] = _model_api_key
+
     for attempt in range(retries + 1):
         try:
-            response = await litellm.acompletion(
-                model=model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=max_tokens,
-                temperature=0.3,
-            )
+            response = await litellm.acompletion(**kwargs)
             return response.choices[0].message.content or ""
         except Exception as e:
             if attempt < retries:
@@ -2137,11 +2256,20 @@ async def generate_html_report(
 # ---------------------------------------------------------------------------
 
 async def async_main(args: argparse.Namespace) -> None:
-    global _verbose
+    global _verbose, _model_api_base, _model_api_key
     _verbose = args.verbose
 
     sections = ALL_SECTIONS
-    model = args.model
+
+    if args.model:
+        model = args.model
+    else:
+        try:
+            model, _model_api_base, _model_api_key = resolve_openclaw_model(args.agent_id)
+        except RuntimeError as e:
+            print(f"Error: could not auto-detect model from OpenClaw config: {e}", file=sys.stderr)
+            print("Please specify --model explicitly.", file=sys.stderr)
+            sys.exit(1)
 
     log(f"Clawlens v{VERSION}")
     log(f"Agent: {args.agent_id}, Days: {args.days}")
@@ -2195,6 +2323,8 @@ def main() -> None:
         description="Clawlens: OpenClaw Usage Insights Report Generator",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Examples:
+  python3 clawlens.py --verbose                          # auto-detect model from OpenClaw config
+  python3 clawlens.py --lang en --days 7                 # auto-detect, English, last 7 days
   DEEPSEEK_API_KEY=sk-xxx python3 clawlens.py --model deepseek/deepseek-chat
   OPENAI_API_KEY=sk-xxx python3 clawlens.py --model openai/gpt-4o --lang en --days 7
   ANTHROPIC_API_KEY=sk-xxx python3 clawlens.py --model anthropic/claude-sonnet-4-20250514 --verbose -o report.md
@@ -2204,8 +2334,9 @@ def main() -> None:
     parser.add_argument("--agent-id", default="main", help="Agent ID (default: main)")
     parser.add_argument("--days", type=int, default=180, help="Analysis window in days (default: 180)")
     parser.add_argument(
-        "--model", required=True,
-        help="LLM model in litellm format (e.g. deepseek/deepseek-chat). API key must be set via env var.",
+        "--model", default=None,
+        help="LLM model in litellm format (e.g. deepseek/deepseek-chat). "
+             "If omitted, auto-detected from OpenClaw config (~/.openclaw/openclaw.json).",
     )
     parser.add_argument("--lang", default="zh", choices=["zh", "en"], help="Report language (default: zh)")
     parser.add_argument("--format", default="md", choices=["md", "html"], help="Output format: md or html (default: md)")
